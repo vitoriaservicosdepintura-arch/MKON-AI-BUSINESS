@@ -13,11 +13,7 @@ import { DEFAULT_UNIFIED_KEY, ensureDefaultFreeLLMKey, getApiKey, getUnifiedBase
  */
 export const UNIFIED_DEFAULT_MODEL = 'auto'
 
-const UNIFIED_MODEL_FALLBACKS = [
-    UNIFIED_DEFAULT_MODEL,
-    'auto:smart',
-    'auto:fast',
-]
+const UNIFIED_MODEL_FALLBACKS = ['auto']
 
 export function getActiveProvider(): 'unified' | null {
     const unifiedKey = getApiKey('unified')
@@ -83,14 +79,15 @@ async function callUnified(systemPrompt: string, userPrompt: string, model = UNI
                 // A chave que funcionou passa a ser a ativa.
                 if (getApiKey('unified') !== apiKey) setApiKey('unified', apiKey)
                 return content
-            } catch (error) {
-                lastError = error instanceof Error ? error : new Error(String(error))
-                if (lastError.name === 'TypeError') {
-                    throw new Error(`Não foi possível contactar a API FreeLLM em ${baseUrl}. Confirme que a instância FreeLLMAPI está a correr e que o endereço está correto (Administração → Integrações).`)
-                }
-                if (lastError.message.includes('model') || lastError.message.includes('not found') || lastError.message.includes('unsupported')) continue
-                throw lastError
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error))
+            if (lastError.name === 'TypeError') {
+                throw new Error(`Não foi possível contactar a API FreeLLM em ${baseUrl}. Confirme que a instância FreeLLMAPI está a correr e que o endereço está correto (Administração → Integrações).`)
             }
+            const retryable = /model|not found|unsupported|no enabled|routing exhausted|no upstream/i.test(lastError.message)
+            if (retryable) continue
+            throw lastError
+        }
         }
     }
 

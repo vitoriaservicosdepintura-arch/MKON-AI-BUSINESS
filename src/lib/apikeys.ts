@@ -10,6 +10,13 @@ const BASE_URL_KEY = 'mkon_apikey_unified_base'
 
 const FALLBACK_UNIFIED_BASE_URL = 'http://localhost:3001/v1'
 
+/**
+ * Domínios públicos que já não servem a API FreeLLMAPI (devolvem 410 Gone).
+ * Valores antigos guardados no browser são ignorados para que a app volte
+ * automaticamente para a instância local.
+ */
+const DEAD_UNIFIED_HOSTS = new Set(['api.free-llm.com', 'free-llm.com', 'www.free-llm.com'])
+
 function normalizeBaseUrl(value: string): string {
     const trimmed = value.trim().replace(/\/+$/, '')
     if (!trimmed) return ''
@@ -17,9 +24,18 @@ function normalizeBaseUrl(value: string): string {
     try {
         const parsed = new URL(trimmed)
         if (!['http:', 'https:'].includes(parsed.protocol)) return ''
+        if (DEAD_UNIFIED_HOSTS.has(parsed.hostname.toLowerCase())) return ''
         return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
     } catch {
         return ''
+    }
+}
+
+export function isKnownDeadUnifiedHost(value: string): boolean {
+    try {
+        return DEAD_UNIFIED_HOSTS.has(new URL(value.trim()).hostname.toLowerCase())
+    } catch {
+        return false
     }
 }
 
@@ -29,8 +45,11 @@ export const DEFAULT_UNIFIED_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_UN
 /** Endereço da instância FreeLLMAPI (self-hosted). Pode ser alterado na Administração. */
 export function getUnifiedBaseUrl(): string {
     try {
-        const custom = normalizeBaseUrl(localStorage.getItem(BASE_URL_KEY) ?? '')
+        const stored = localStorage.getItem(BASE_URL_KEY) ?? ''
+        const custom = normalizeBaseUrl(stored)
         if (custom) return custom
+        // Endereço morto (ou inválido) guardado numa sessão anterior: limpar.
+        if (stored) localStorage.removeItem(BASE_URL_KEY)
     } catch { /* ignore */ }
     return DEFAULT_UNIFIED_BASE_URL
 }
@@ -114,7 +133,8 @@ export async function validateApiKey(provider: ApiKeyProvider, value: string): P
         if (provider === 'unified') {
             const baseUrl = getUnifiedBaseUrl()
             const controller = new AbortController()
-            const timer = setTimeout(() => controller.abort(), 10000)
+            // Modelos locais (Ollama) podem demorar a carregar na primeira chamada.
+            const timer = setTimeout(() => controller.abort(), 120000)
             try {
                 const res = await fetch(`${baseUrl}/chat/completions`, {
                     method: 'POST',

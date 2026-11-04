@@ -189,10 +189,10 @@ export const DEMO: {
   ],
 
   agents: [
-    { id: 'a1', code: 'lead_analyst', name: 'Lead Analyst', description: 'Analisa perfis de empresas e pontua oportunidades de negócio', status: 'pausado', model: 'gpt-4o-mini', provider: 'openai', daily_task_limit: 50, monthly_budget_eur: 10, last_error: null },
-    { id: 'a2', code: 'copy_agent', name: 'Copy Agent', description: 'Gera mensagens de contacto e follow-up personalizadas', status: 'pausado', model: 'gpt-4o-mini', provider: 'openai', daily_task_limit: 30, monthly_budget_eur: 8, last_error: null },
-    { id: 'a3', code: 'proposal_bot', name: 'Proposal Bot', description: 'Elabora propostas comerciais em PDF com base no perfil do cliente', status: 'pausado', model: 'gpt-4o', provider: 'openai', daily_task_limit: 20, monthly_budget_eur: 15, last_error: null },
-    { id: 'a4', code: 'review_responder', name: 'Review Responder', description: 'Responde a avaliações do Google Business de forma personalizada', status: 'pausado', model: 'gpt-4o-mini', provider: 'openai', daily_task_limit: 40, monthly_budget_eur: 5, last_error: null },
+    { id: 'a1', code: 'lead_analyst', name: 'Lead Analyst', description: 'Analisa perfis de empresas e pontua oportunidades de negócio', status: 'pausado', model: 'auto', provider: 'unified', daily_task_limit: 50, monthly_budget_eur: 10, last_error: null },
+    { id: 'a2', code: 'copy_agent', name: 'Copy Agent', description: 'Gera mensagens de contacto e follow-up personalizadas', status: 'pausado', model: 'auto', provider: 'unified', daily_task_limit: 30, monthly_budget_eur: 8, last_error: null },
+    { id: 'a3', code: 'proposal_bot', name: 'Proposal Bot', description: 'Elabora propostas comerciais em PDF com base no perfil do cliente', status: 'pausado', model: 'auto', provider: 'unified', daily_task_limit: 20, monthly_budget_eur: 15, last_error: null },
+    { id: 'a4', code: 'review_responder', name: 'Review Responder', description: 'Responde a avaliações do Google Business de forma personalizada', status: 'pausado', model: 'auto', provider: 'unified', daily_task_limit: 40, monthly_budget_eur: 5, last_error: null },
   ],
 
   agentStats: {

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle, Volume2, VolumeX, Mic, MicOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getApiKey, hasApiKey, getUnifiedBaseUrl } from '@/lib/apikeys'
+import { UNIFIED_DEFAULT_MODEL } from '@/lib/ai'
 import { speak, stopSpeaking, setVoiceEnabled } from '@/lib/voice'
 import { loadSystemSnapshot, formatSystemContext, detectNavigationCommand, MODULE_KNOWLEDGE, type SystemSnapshot } from '@/lib/systemContext'
 import { playBotOpen, playBotClose } from '@/lib/sfx'
@@ -42,17 +43,15 @@ CAPACIDADES:
 Responda sempre em Português de Portugal, com linguagem natural e clara.`
 /* ─── FreeLLM (OpenAI-compatible) models ─── */
 const UNIFIED_MODELS = [
-    { id: 'gpt-4o-mini', label: 'OpenAI-compatible mini' },
-    { id: 'llama-3.1-70b-instruct', label: 'Llama 3.1 70B' },
-    { id: 'deepseek-v3', label: 'DeepSeek V3' },
-    { id: 'qwen2.5-72b-instruct', label: 'Qwen 2.5 72B' },
+    { id: 'auto', label: 'Auto (router FreeLLM)' },
+    { id: 'fusion', label: 'Fusion (painel de modelos)' },
 ]
-const DEFAULT_UNIFIED_MODEL = 'gpt-4o-mini'
+const DEFAULT_UNIFIED_MODEL = UNIFIED_DEFAULT_MODEL
 
 /* ─── API call helpers ─── */
 async function callUnified(messages: { role: string; content: string }[], apiKey: string, model: string, systemPrompt: string = SYSTEM_PROMPT): Promise<string> {
     const baseUrl = getUnifiedBaseUrl()
-    const candidates = [model, DEFAULT_UNIFIED_MODEL, 'llama-3.1-70b-instruct', 'qwen2.5-72b-instruct']
+    const candidates = Array.from(new Set([model, DEFAULT_UNIFIED_MODEL]))
     let lastError: Error | null = null
 
     for (const modelName of candidates) {

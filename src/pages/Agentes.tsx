@@ -282,10 +282,8 @@ function EditAgentModal({ agent, onClose, onSaved }: { agent: Agent | null; onCl
                 <Field label="Modelo (FreeLLM)">
                     <select className="input" value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))}>
                         <optgroup label="FreeLLM (OpenAI-compatible)">
-                            <option value="gpt-4o-mini">GPT-4o mini (recomendado)</option>
-                            <option value="llama-3.1-70b-instruct">Llama 3.1 70B</option>
-                            <option value="deepseek-v3">DeepSeek V3</option>
-                            <option value="qwen2.5-72b-instruct">Qwen 2.5 72B</option>
+                            <option value="auto">Auto — router escolhe o modelo local (recomendado)</option>
+                            <option value="fusion">Fusion — painel de modelos</option>
                         </optgroup>
                     </select>
                 </Field>
