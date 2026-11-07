@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, Database, FlaskConical, KeyRound, ListChecks, Plug, ScrollText, ShieldAlert, Workflow, Download, Upload, Eye, EyeOff, CheckCircle2, ExternalLink, Power } from 'lucide-react'
+import { Bot, Database, FlaskConical, KeyRound, ListChecks, Plug, ScrollText, ShieldAlert, Workflow, Download, Upload, Info, Eye, EyeOff, CheckCircle2, ExternalLink } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { logActivity } from '@/lib/log'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 import { cn, dateTime } from '@/lib/utils'
 import { isDemoActive, DEMO } from '@/lib/demo'
-import { getApiKey, setApiKey, hasApiKey, API_KEY_META, getUnifiedBaseUrl, setUnifiedBaseUrl, validateApiKey, type ApiKeyId } from '@/lib/apikeys'
-import { isAiReady, UNIFIED_DEFAULT_MODEL } from '@/lib/ai'
+import { getApiKey, setApiKey, hasApiKey, API_KEY_META, getLlmBaseUrl, setLlmBaseUrl, DEFAULT_LLM_BASE_URL, type ApiKeyId } from '@/lib/apikeys'
+import { effectiveModel, testFreeLlm } from '@/lib/llm'
+import { isAiReady } from '@/lib/ai'
 
 type Tab = 'integracoes' | 'agentes' | 'automacao' | 'logs' | 'dados' | 'definicoes'
 const TABS: { key: Tab; label: string; icon: typeof Plug }[] = [
@@ -59,7 +60,7 @@ const STATUS: Record<string, { label: string; tone: 'neutral' | 'success' | 'war
   desativada: { label: 'Desativada', tone: 'neutral' },
 }
 /* ── API Key Row ── */
-function ApiKeyRow({ id }: { id: ApiKeyId }) {
+function ApiKeyRow({ id, onSaved }: { id: ApiKeyId; onSaved?: () => void }) {
   const toast = useToast()
   const meta = API_KEY_META[id]
   const [value, setValue] = useState(() => getApiKey(id))
@@ -69,6 +70,7 @@ function ApiKeyRow({ id }: { id: ApiKeyId }) {
   const save = () => {
     setApiKey(id, value)
     setSaved(hasApiKey(id))
+    onSaved?.()
     toast.push('success', saved && !value.trim() ? `${meta.label} removida.` : `${meta.label} guardada localmente.`)
   }
 
@@ -100,41 +102,48 @@ function ApiKeyRow({ id }: { id: ApiKeyId }) {
   )
 }
 
-/* ── Endereço da instância FreeLLMAPI ── */
-function UnifiedEndpointRow() {
+/* ── FreeLLMAPI: chave unificada + endereço + teste ── */
+function FreeLlmPanel() {
   const toast = useToast()
-  const [value, setValue] = useState(() => getUnifiedBaseUrl())
+  const [url, setUrl] = useState(() => (getLlmBaseUrl() === DEFAULT_LLM_BASE_URL ? '' : getLlmBaseUrl()))
   const [testing, setTesting] = useState(false)
+  const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null)
 
-  const save = () => {
-    setUnifiedBaseUrl(value)
-    setValue(getUnifiedBaseUrl())
-    toast.push('success', 'Endereço da API FreeLLM guardado.')
+  const saveUrl = () => {
+    setLlmBaseUrl(url)
+    setUrl(getLlmBaseUrl() === DEFAULT_LLM_BASE_URL ? '' : getLlmBaseUrl())
+    toast.push('success', `Endereço guardado: ${getLlmBaseUrl()}`)
   }
-
   const test = async () => {
-    const key = getApiKey('unified')
-    if (!key) return toast.push('error', 'Guarde primeiro a chave FreeLLM.')
-    setUnifiedBaseUrl(value)
-    setTesting(true)
-    const ok = await validateApiKey('unified', key)
-    setTesting(false)
-    toast.push(ok ? 'success' : 'error', ok
-      ? 'Ligação à API FreeLLM validada.'
-      : `Sem resposta de ${getUnifiedBaseUrl()}. Confirme que a instância FreeLLMAPI está a correr.`)
+    setTesting(true); setStatus(null)
+    const r = await testFreeLlm()
+    setStatus(r); setTesting(false)
   }
 
   return (
-    <div className="border-t border-white/[0.06] pt-4">
-      <label className="label">Endereço da API FreeLLM (base URL)</label>
-      <div className="flex items-end gap-2">
-        <input className="input font-mono text-xs" value={value} onChange={(e) => setValue(e.target.value)} placeholder="http://localhost:3001/v1" autoComplete="off" />
-        <Button size="sm" variant="outline" onClick={save} className="mb-px shrink-0">Guardar</Button>
-        <Button size="sm" variant="outline" onClick={test} loading={testing} className="mb-px shrink-0">Testar</Button>
+    <div className="space-y-3 rounded-xl border border-brand/25 bg-brand/[0.05] p-4">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold">FreeLLMAPI</span>
+        <Badge tone="brand">Principal</Badge>
+        <span className="text-[11px] text-white/40">Uma só chave para o MKON Bot, todos os agentes e a prospeção.</span>
       </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-white/35">
-        A FreeLLMAPI é um proxy self-hosted: aponte para a sua instância (predefinição <code className="font-mono">http://localhost:3001/v1</code>). O domínio api.free-llm.com foi descontinuado.
+      <ApiKeyRow id="freellm" onSaved={() => setStatus(null)} />
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <label className="label">Endereço do FreeLLMAPI</label>
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={DEFAULT_LLM_BASE_URL} className="input font-mono text-xs" autoComplete="off" />
+        </div>
+        <Button size="sm" variant="outline" onClick={saveUrl} className="mb-px shrink-0">Guardar</Button>
+        <Button size="sm" onClick={test} loading={testing} className="mb-px shrink-0">Testar ligação</Button>
+      </div>
+      <p className="text-[11px] leading-relaxed text-white/40">
+        O FreeLLMAPI corre na sua máquina ou num servidor seu (por omissão <code className="font-mono">{DEFAULT_LLM_BASE_URL}</code>). Deixe o endereço vazio se estiver no mesmo computador.
       </p>
+      {status && (
+        <p className={cn('rounded-lg border px-3 py-2 text-xs', status.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-red-500/30 bg-red-500/10 text-red-300')}>
+          {status.ok ? '✓ ' : '✕ '}{status.message}
+        </p>
+      )}
     </div>
   )
 }
@@ -186,21 +195,28 @@ function Integrations() {
       {/* ── AI Keys section ── */}
       <Card className="mb-6">
         <CardHeader
-          title="Chave de IA — FreeLLM"
-          subtitle="Usada pelo MKON Bot e pelos agentes. Guardada apenas no seu browser, nunca enviada para servidores."
+          title="Chaves de IA"
+          subtitle="FreeLLMAPI é o principal; Groq e Gemini ficam como reserva. Guardadas apenas no seu browser."
         />
         <div className="space-y-4 p-5">
           <div className="flex items-start gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 text-xs text-white/45">
             <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-soft" />
             As chaves são armazenadas em <code className="font-mono">localStorage</code> do seu browser. Nunca saem do seu dispositivo.
           </div>
-          <div className="max-w-xl">
-            <ApiKeyRow id="unified" />
-            <a href={API_KEY_META.unified.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-brand-soft/70 hover:text-brand-soft">
-              Obter chave FreeLLM <ExternalLink className="h-2.5 w-2.5" />
-            </a>
-            <div className="mt-4">
-              <UnifiedEndpointRow />
+          <FreeLlmPanel />
+          <p className="pt-1 text-[11px] font-medium uppercase tracking-wider text-white/30">Reserva (opcional)</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <ApiKeyRow id="groq" />
+              <a href={API_KEY_META.groq.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-brand-soft/70 hover:text-brand-soft">
+                Obter chave Groq <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            </div>
+            <div>
+              <ApiKeyRow id="gemini" />
+              <a href={API_KEY_META.gemini.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-brand-soft/70 hover:text-brand-soft">
+                Obter chave Gemini <ExternalLink className="h-2.5 w-2.5" />
+              </a>
             </div>
           </div>
         </div>
@@ -264,25 +280,28 @@ function Agents() {
   const [stats, setStats] = useState<Record<string, { done: number; failed: number; cost: number }>>({})
   const [edit, setEdit] = useState<Agent | null>(null)
   const [form, setForm] = useState({ model: '', daily: '', budget: '' })
+  const [openAiReady, setOpenAiReady] = useState(false)
+  const aiReady = isAiReady()
 
   const demo = isDemoActive()
-  const aiReady = isAiReady()
   const load = useCallback(async () => {
     if (demo) {
       setAgents(DEMO.agents as Agent[])
       setStats(Object.fromEntries(DEMO.agents.map((ag) => [ag.id, DEMO.agentStats[ag.id] ?? { done: 0, failed: 0, cost: 0 }])))
+      setOpenAiReady(false)
       return
     }
-    const [a, t, u] = await Promise.all([
+    const [a, t, u, i] = await Promise.all([
       supabase.from('ai_agents').select('id, code, name, description, status, model, provider, daily_task_limit, monthly_budget_eur, last_error').order('sort_order'),
       supabase.from('ai_tasks').select('agent_id, status'),
       supabase.from('ai_usage').select('agent_id, cost_eur'),
+      supabase.from('integrations').select('status').eq('provider', 'openai').maybeSingle(),
     ])
     setAgents((a.data ?? []) as Agent[])
     const s: Record<string, { done: number; failed: number; cost: number }> = {}
       ; (t.data ?? []).forEach((x) => { s[x.agent_id] ??= { done: 0, failed: 0, cost: 0 }; if (x.status === 'concluida') s[x.agent_id].done++; if (x.status === 'cancelada') s[x.agent_id].failed++ })
       ; (u.data ?? []).forEach((x) => { if (x.agent_id) { s[x.agent_id] ??= { done: 0, failed: 0, cost: 0 }; s[x.agent_id].cost += Number(x.cost_eur) } })
-    setStats(s)
+    setStats(s); setOpenAiReady(i.data?.status === 'conectada')
   }, [demo])
   useEffect(() => { load() }, [load])
 
@@ -291,17 +310,6 @@ function Agents() {
     const { error } = await supabase.from('ai_agents').update({ status }).eq('id', a.id)
     if (error) return toast.push('error', error.message)
     toast.push('success', `${a.name}: ${status}.`); load()
-  }
-  const activateAll = async () => {
-    if (!agents?.length) return
-    if (demo) { toast.push('info', 'Modo demo — agentes não alterados.'); return }
-    const ids = agents.map((a) => a.id)
-    const { error } = await supabase.from('ai_agents')
-      .update({ status: 'ativo', provider: 'unified', model: UNIFIED_DEFAULT_MODEL })
-      .in('id', ids)
-    if (error) return toast.push('error', error.message)
-    toast.push('success', `${ids.length} agentes ligados à FreeLLM.`)
-    load()
   }
   const openEdit = (a: Agent) => { setEdit(a); setForm({ model: a.model, daily: String(a.daily_task_limit), budget: String(a.monthly_budget_eur) }) }
   const save = async () => {
@@ -315,18 +323,11 @@ function Agents() {
   if (!agents) return <Skeleton className="h-64" />
   return (
     <>
-      <div className={cn('mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-xs', aiReady ? 'border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-100/90' : 'border-amber-500/25 bg-amber-500/[0.07] text-amber-100/90')}>
-        <span>
-          {aiReady ? (
-            <><strong>FreeLLM ativa</strong> — os agentes executam tarefas com a chave unificada.</>
-          ) : (
-            <>Sem chave de IA ativa. Adicione a chave <strong>FreeLLM</strong> no separador Integrações para os agentes executarem tarefas.</>
-          )}
-        </span>
-        {aiReady && agents.length > 0 && (
-          <Button size="sm" variant="outline" onClick={activateAll}><Power className="h-3.5 w-3.5" /> Ligar todos os agentes</Button>
-        )}
-      </div>
+      {!aiReady && !openAiReady && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs text-amber-100/90">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" /> Sem chave de IA. Adicione a chave <strong>FreeLLMAPI</strong> em Integrações: sem ela os agentes <strong>não executam tarefas</strong>.
+        </div>
+      )}
       <div className="grid gap-3 md:grid-cols-2">
         {agents.map((a) => {
           const s = stats[a.id] ?? { done: 0, failed: 0, cost: 0 }
@@ -338,7 +339,7 @@ function Agents() {
                 <Badge tone={a.status === 'ativo' ? 'success' : a.status === 'erro' ? 'danger' : 'neutral'}>{a.status}</Badge>
               </div>
               <dl className="mt-3 grid grid-cols-4 gap-2 text-[11px]">
-                {[['Modelo', a.model], ['Tarefas', total], ['Sucesso', total ? `${Math.round((s.done / total) * 100)}%` : '—'], ['Custo', `${s.cost.toFixed(2)} €`]].map(([k, v]) => (
+                {[['Modelo', effectiveModel(a.model)], ['Tarefas', total], ['Sucesso', total ? `${Math.round((s.done / total) * 100)}%` : '—'], ['Custo', `${s.cost.toFixed(2)} €`]].map(([k, v]) => (
                   <div key={String(k)}><dt className="text-white/30">{k}</dt><dd className="truncate text-white/70">{v}</dd></div>
                 ))}
               </dl>

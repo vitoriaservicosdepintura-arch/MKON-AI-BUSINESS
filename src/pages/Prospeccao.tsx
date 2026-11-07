@@ -304,7 +304,7 @@ function CompanyModal({ company: c, onClose, onAddLead, onChanged }: { company: 
                                 </Button>
                             </div>
                         </div>
-                        {!aiReady && <p className="text-[11px] text-amber-400/80">Configure a chave FreeLLM em Administração → Integrações para usar IA.</p>}
+                        {!aiReady && <p className="text-[11px] text-amber-400/80">Configure uma chave Groq ou Gemini em Administração → Integrações para usar IA.</p>}
                         {aiResult && (
                             <div className="space-y-3">
                                 <div className="flex items-center gap-3">

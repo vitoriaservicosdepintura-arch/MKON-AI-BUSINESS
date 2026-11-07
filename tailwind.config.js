@@ -1,17 +1,20 @@
 /** @type {import('tailwindcss').Config} */
+// Cores vêm de variáveis CSS (src/index.css) para o seletor de tema.
+const v = (name) => `rgb(var(--${name}) / <alpha-value>)`
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        ink: '#101114',
-        graphite: '#1B1D21',
-        slate2: '#292C31',
-        snow: '#F5F5F5',
-        brand: {
-          DEFAULT: 'rgba(var(--brand-primary-rgb), 1)',
-          soft: 'rgba(var(--brand-soft-rgb), 1)',
-        },
+        ink: v('ink'),
+        graphite: v('graphite'),
+        slate2: v('slate2'),
+        snow: v('snow'),
+        // "white" = cor de primeiro plano do tema (branco nos escuros, tinta no claro)
+        white: v('fg'),
+        brand: { DEFAULT: v('brand'), soft: v('brand-soft') },
+        'on-brand': v('on-brand'),
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],

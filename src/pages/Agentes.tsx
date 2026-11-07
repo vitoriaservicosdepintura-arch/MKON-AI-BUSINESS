@@ -5,12 +5,18 @@ import { Badge, Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader, 
 import { useToast } from '@/components/ui/Toast'
 import { cn, relativeTime } from '@/lib/utils'
 import { isDemoActive, DEMO } from '@/lib/demo'
-import { askAI, isAiReady, getProviderLabel } from '@/lib/ai'
+import { chatAI, isAiReady, getProviderLabel } from '@/lib/ai'
+import { FREELLM_MODELS, effectiveModel, isFreeLlmModel } from '@/lib/llm'
 
 type Agent = {
     id: string; code: string; name: string; description: string; status: string
     model: string; provider: string; daily_task_limit: number; monthly_budget_eur: number
-    last_error: string | null; sort_order: number
+    last_error: string | null; sort_order: number; system_prompt?: string | null
+}
+
+/** Com FreeLLMAPI, modelos antigos (ex.: gpt-4o-mini) passam a 'auto'. */
+function modelForAgent(agent: Pick<Agent, 'model'>): string {
+    return effectiveModel(agent.model)
 }
 type Task = {
     id: string; title: string; status: string; error_message: string | null
@@ -63,6 +69,14 @@ export default function Agentes() {
         toast.push('success', `Agente ${next === 'ativo' ? 'ativado' : 'pausado'}.`)
     }
 
+    const activateAll = async () => {
+        if (demo) { toast.push('info', 'Modo demo — sem efeito real.'); return }
+        const { error } = await supabase.from('ai_agents').update({ status: 'ativo' }).neq('status', 'ativo')
+        if (error) return toast.push('error', error.message)
+        toast.push('success', 'Todos os agentes foram ativados.')
+        load()
+    }
+
     const agentStats = (agentId: string) => {
         if (demo) return DEMO.agentStats[agentId] ?? { done: 0, failed: 0, cost: 0 }
         const agTasks = tasks.filter(t => t.ai_agents?.name === agents.find(a => a.id === agentId)?.name)
@@ -79,15 +93,19 @@ export default function Agentes() {
 
     return (
         <>
-            <PageHeader title="Agentes de IA" description="Centro de controlo dos agentes especializados. Ative, configure e monitorize cada agente." />
+            <PageHeader
+                title="Agentes de IA"
+                description="Centro de controlo dos agentes especializados. Ative, configure e monitorize cada agente."
+                actions={agents.some(a => a.status !== 'ativo') ? <Button size="sm" onClick={activateAll}><Play className="h-3.5 w-3.5" /> Ativar todos</Button> : undefined}
+            />
 
             {/* Info banner */}
             <div className={cn('mb-5 flex items-start gap-3 rounded-xl border px-4 py-3', isAiReady() ? 'border-green-500/20 bg-green-500/[0.05]' : 'border-white/[0.08] bg-white/[0.02]')}>
                 <Cpu className="mt-0.5 h-4 w-4 shrink-0 text-brand-soft" />
                 <p className="text-xs text-white/60">
                     {isAiReady()
-                        ? <><strong className="text-green-400">✓ IA pronta</strong> — {getProviderLabel()} ligado. Os agentes podem executar tarefas reais. Clique em “Executar tarefa” num agente.</>
-                        : <>Os agentes requerem a chave <strong className="text-white/80">FreeLLM</strong> configurada em <strong className="text-white/80">Administração → Integrações</strong>.</>
+                        ? <><strong className="text-green-400">✓ IA pronta</strong> — {getProviderLabel()} ligado: todos os agentes usam esta ligação. Ative um agente e clique em “Executar tarefa”.</>
+                        : <>Os agentes requerem a chave <strong className="text-white/80">FreeLLMAPI</strong> configurada em <strong className="text-white/80">Administração → Integrações</strong>.</>
                     }
                 </p>
             </div>
@@ -114,7 +132,7 @@ export default function Agentes() {
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <h3 className="text-sm font-semibold">{agent.name}</h3>
                                             <Badge tone={cfg.tone}>{cfg.label}</Badge>
-                                            <span className="text-[11px] text-white/30">{agent.model}</span>
+                                            <span className="text-[11px] text-white/30">{modelForAgent(agent)}</span>
                                         </div>
                                         <p className="mt-1 text-xs text-white/50">{agent.description}</p>
                                         <div className="mt-3 flex items-center gap-4 text-[11px] text-white/35">
@@ -129,7 +147,7 @@ export default function Agentes() {
                                         <Button variant="ghost" size="sm" onClick={() => setExpandedAgent(expanded ? null : agent.id)}>
                                             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                         </Button>
-                                        {isAiReady() && <RunTaskButton agent={agent} onDone={load} />}
+                                        {isAiReady() && <RunTaskButton agent={agent} onDone={load} disabled={!demo && agent.status !== 'ativo'} />}
                                         <Button size="sm" variant={agent.status === 'ativo' ? 'outline' : 'primary'} onClick={() => toggleStatus(agent)}>
                                             {agent.status === 'ativo' ? <><Pause className="h-3.5 w-3.5" /> Pausar</> : <><Play className="h-3.5 w-3.5" /> Ativar</>}
                                         </Button>
@@ -196,37 +214,80 @@ export default function Agentes() {
 }
 
 /* ── Run Task inline ── */
-function RunTaskButton({ agent, onDone }: { agent: Agent; onDone: () => void }) {
+function RunTaskButton({ agent, onDone, disabled }: { agent: Agent; onDone: () => void; disabled?: boolean }) {
     const toast = useToast()
     const [open, setOpen] = useState(false)
     const [task, setTask] = useState('')
     const [running, setRunning] = useState(false)
     const [result, setResult] = useState('')
+    const [via, setVia] = useState('')
     const demo = isDemoActive()
+
+    const close = () => { setOpen(false); setResult(''); setVia(''); setTask('') }
 
     const run = async () => {
         if (!task.trim()) return
-        setRunning(true); setResult('')
+        setRunning(true); setResult(''); setVia('')
+
+        // Proteções: botão de emergência e limite diário
+        if (!demo) {
+            const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0)
+            const [ks, today] = await Promise.all([
+                supabase.from('system_settings').select('value').eq('key', 'automation_kill_switch').maybeSingle(),
+                supabase.from('ai_tasks').select('id', { count: 'exact', head: true }).eq('agent_id', agent.id).gte('created_at', startOfDay.toISOString()),
+            ])
+            if (ks.data?.value === true) { toast.push('error', 'Botão de emergência ativo: os agentes estão parados.'); setRunning(false); return }
+            if ((today.count ?? 0) >= agent.daily_task_limit) { toast.push('error', `${agent.name} atingiu o limite diário (${agent.daily_task_limit} tarefas).`); setRunning(false); return }
+        }
+
+        const startedAt = new Date().toISOString()
         try {
-            const system = `Você é o agente "${agent.name}" no sistema MKON AI Business. ${agent.description}\nResponda em Português de Portugal. Seja concreto e útil.`
-            const reply = await askAI(system, task)
-            setResult(reply)
+            const system = [
+                `Você é o agente "${agent.name}" no sistema MKON AI Business, uma agência de serviços digitais em Portugal.`,
+                agent.description,
+                agent.system_prompt ? `Regras: ${agent.system_prompt}` : '',
+                'Responda em Português de Portugal. Seja concreto e útil.',
+            ].filter(Boolean).join('\n')
+            const r = await chatAI([{ role: 'system', content: system }, { role: 'user', content: task }], { model: modelForAgent(agent) })
+            setResult(r.text)
+            setVia(r.routedVia ?? `${r.provider}/${r.model}`)
+
             if (!demo) {
-                await supabase.from('ai_tasks').insert({ agent_id: agent.id, title: task.slice(0, 100), status: 'concluida', input: { prompt: task }, output: { reply }, started_at: new Date().toISOString(), finished_at: new Date().toISOString() })
+                const { data: row, error } = await supabase.from('ai_tasks').insert({
+                    agent_id: agent.id, title: task.slice(0, 100), status: 'concluida',
+                    input: { prompt: task }, output: { reply: r.text, via: r.routedVia },
+                    started_at: startedAt, finished_at: new Date().toISOString(),
+                }).select('id').single()
+                if (error) toast.push('info', `Resposta obtida, mas o registo da tarefa falhou: ${error.message}`)
+                await supabase.from('ai_usage').insert({
+                    agent_id: agent.id, task_id: row?.id ?? null,
+                    provider: r.provider === 'freellm' ? 'freellmapi' : r.provider,
+                    model: r.routedVia ?? r.model, input_tokens: r.inputTokens, output_tokens: r.outputTokens, cost_eur: 0,
+                })
+                if (agent.last_error) await supabase.from('ai_agents').update({ last_error: null }).eq('id', agent.id)
                 onDone()
             }
         } catch (e) {
-            toast.push('error', e instanceof Error ? e.message : 'Erro ao executar tarefa.')
+            const msg = e instanceof Error ? e.message : 'Erro ao executar tarefa.'
+            toast.push('error', msg)
+            if (!demo) {
+                await supabase.from('ai_tasks').insert({
+                    agent_id: agent.id, title: task.slice(0, 100), status: 'cancelada',
+                    input: { prompt: task }, error_message: msg, started_at: startedAt, finished_at: new Date().toISOString(),
+                })
+                await supabase.from('ai_agents').update({ last_error: msg }).eq('id', agent.id)
+                onDone()
+            }
         } finally { setRunning(false) }
     }
 
     return (
         <>
-            <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+            <Button size="sm" variant="outline" disabled={disabled} title={disabled ? 'Ative o agente para executar tarefas' : undefined} onClick={() => setOpen(true)}>
                 <Send className="h-3.5 w-3.5" /> Executar tarefa
             </Button>
-            <Modal open={open} onClose={() => { setOpen(false); setResult(''); setTask('') }} title={`Executar — ${agent.name}`}
-                footer={<><Button variant="ghost" onClick={() => { setOpen(false); setResult(''); setTask('') }}>Fechar</Button><Button onClick={run} loading={running} disabled={!task.trim()}><Send className="h-4 w-4" /> Executar</Button></>}>
+            <Modal open={open} onClose={close} title={`Executar — ${agent.name}`}
+                footer={<><Button variant="ghost" onClick={close}>Fechar</Button><Button onClick={run} loading={running} disabled={!task.trim()}><Send className="h-4 w-4" /> Executar</Button></>}>
                 <div className="space-y-3">
                     <p className="text-xs text-white/50">{agent.description}</p>
                     <Field label="Descreva a tarefa">
@@ -239,7 +300,7 @@ function RunTaskButton({ agent, onDone }: { agent: Agent; onDone: () => void }) 
                     )}
                     {result && (
                         <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-                            <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-white/30">Resultado</p>
+                            <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-white/30">Resultado{via ? ` · ${via}` : ''}</p>
                             <p className="text-sm leading-relaxed text-white/80 whitespace-pre-wrap">{result}</p>
                         </div>
                     )}
@@ -257,7 +318,7 @@ function EditAgentModal({ agent, onClose, onSaved }: { agent: Agent | null; onCl
 
     useEffect(() => {
         if (!agent) return
-        setForm({ daily_task_limit: String(agent.daily_task_limit), monthly_budget_eur: String(agent.monthly_budget_eur), model: agent.model })
+        setForm({ daily_task_limit: String(agent.daily_task_limit), monthly_budget_eur: String(agent.monthly_budget_eur), model: isFreeLlmModel(agent.model) ? agent.model : 'auto' })
     }, [agent])
 
     const save = async (e: React.FormEvent) => {
@@ -269,6 +330,7 @@ function EditAgentModal({ agent, onClose, onSaved }: { agent: Agent | null; onCl
             daily_task_limit: Number(form.daily_task_limit),
             monthly_budget_eur: Number(form.monthly_budget_eur),
             model: form.model,
+            provider: 'freellmapi',
         }).eq('id', agent.id)
         setBusy(false)
         if (error) return toast.push('error', error.message)
@@ -279,11 +341,10 @@ function EditAgentModal({ agent, onClose, onSaved }: { agent: Agent | null; onCl
     return (
         <Modal open={!!agent} onClose={onClose} title={`Configurar — ${agent?.name}`} footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" form="edit-agent" loading={busy}>Guardar</Button></>}>
             <form id="edit-agent" onSubmit={save} className="space-y-4">
-                <Field label="Modelo (FreeLLM)">
-                    <select className="input" value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))}>
-                        <optgroup label="FreeLLM (OpenAI-compatible)">
-                            <option value="auto">Auto — router escolhe o modelo local (recomendado)</option>
-                            <option value="fusion">Fusion — painel de modelos</option>
+                <Field label="Modelo" hint="Com a chave unificada FreeLLMAPI o encaminhamento é automático.">
+                    <select className="input" value={isFreeLlmModel(form.model) ? form.model : 'auto'} onChange={e => setForm(f => ({ ...f, model: e.target.value }))}>
+                        <optgroup label="FreeLLMAPI (chave unificada)">
+                            {FREELLM_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                         </optgroup>
                     </select>
                 </Field>

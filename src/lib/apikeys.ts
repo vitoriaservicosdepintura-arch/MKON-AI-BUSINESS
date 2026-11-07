@@ -1,72 +1,17 @@
 /**
  * API Keys — armazenamento local seguro (apenas no browser do proprietário).
  * As chaves NUNCA são enviadas para o Supabase.
- * A única chave de IA suportada é a FreeLLM (API unificada OpenAI-compatible).
  */
 
 const PREFIX = 'mkon_apikey_'
-const LEGACY_AI_KEYS = ['groq', 'gemini'] as const
-const BASE_URL_KEY = 'mkon_apikey_unified_base'
 
-const FALLBACK_UNIFIED_BASE_URL = 'http://localhost:3001/v1'
-
-/**
- * Domínios públicos que já não servem a API FreeLLMAPI (devolvem 410 Gone).
- * Valores antigos guardados no browser são ignorados para que a app volte
- * automaticamente para a instância local.
- */
-const DEAD_UNIFIED_HOSTS = new Set(['api.free-llm.com', 'free-llm.com', 'www.free-llm.com'])
-
-function normalizeBaseUrl(value: string): string {
-    const trimmed = value.trim().replace(/\/+$/, '')
-    if (!trimmed) return ''
-
-    try {
-        const parsed = new URL(trimmed)
-        if (!['http:', 'https:'].includes(parsed.protocol)) return ''
-        if (DEAD_UNIFIED_HOSTS.has(parsed.hostname.toLowerCase())) return ''
-        return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
-    } catch {
-        return ''
-    }
-}
-
-export function isKnownDeadUnifiedHost(value: string): boolean {
-    try {
-        return DEAD_UNIFIED_HOSTS.has(new URL(value.trim()).hostname.toLowerCase())
-    } catch {
-        return false
-    }
-}
-
-export const DEFAULT_UNIFIED_KEY = (import.meta.env.VITE_UNIFIED_API_KEY as string | undefined ?? '').trim()
-export const DEFAULT_UNIFIED_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_UNIFIED_API_BASE_URL as string | undefined ?? '') || FALLBACK_UNIFIED_BASE_URL
-
-/** Endereço da instância FreeLLMAPI (self-hosted). Pode ser alterado na Administração. */
-export function getUnifiedBaseUrl(): string {
-    try {
-        const stored = localStorage.getItem(BASE_URL_KEY) ?? ''
-        const custom = normalizeBaseUrl(stored)
-        if (custom) return custom
-        // Endereço morto (ou inválido) guardado numa sessão anterior: limpar.
-        if (stored) localStorage.removeItem(BASE_URL_KEY)
-    } catch { /* ignore */ }
-    return DEFAULT_UNIFIED_BASE_URL
-}
-
-export function setUnifiedBaseUrl(value: string) {
-    try {
-        const normalized = normalizeBaseUrl(value)
-        if (normalized) localStorage.setItem(BASE_URL_KEY, normalized)
-        else localStorage.removeItem(BASE_URL_KEY)
-    } catch { /* ignore */ }
-}
-
-export type ApiKeyId = 'unified' | 'openai' | 'google_places' | 'whatsapp' | 'n8n'
-export type ApiKeyProvider = 'unified'
+export type ApiKeyId = 'freellm' | 'groq' | 'gemini' | 'openai' | 'google_places' | 'whatsapp' | 'n8n'
+export type ApiKeyProvider = 'groq' | 'gemini'
 
 export const API_KEY_META: Record<ApiKeyId, { label: string; placeholder: string; url: string; provider: string }> = {
-    unified: { label: 'FreeLLM / Unified API Key', placeholder: 'freellmapi-...', url: 'https://github.com/tashfeenahmed/freellmapi', provider: 'unified' },
+    freellm: { label: 'FreeLLMAPI — chave unificada', placeholder: 'freellmapi-...', url: 'https://github.com/tashfeenahmed/freellmapi', provider: 'freellmapi' },
+    groq: { label: 'Groq API Key', placeholder: 'gsk_...', url: 'https://console.groq.com/keys', provider: 'groq' },
+    gemini: { label: 'Google Gemini API Key', placeholder: 'AIza...', url: 'https://aistudio.google.com/app/apikey', provider: 'google_studio' },
     openai: { label: 'OpenAI API Key', placeholder: 'sk-...', url: 'https://platform.openai.com/api-keys', provider: 'openai' },
     google_places: { label: 'Google Places API Key', placeholder: 'AIza...', url: 'https://console.cloud.google.com/apis/credentials', provider: 'google_places' },
     whatsapp: { label: 'WhatsApp Access Token', placeholder: 'EAAh...', url: 'https://developers.facebook.com/apps/', provider: 'whatsapp' },
@@ -84,21 +29,39 @@ export function setApiKey(id: ApiKeyId, value: string) {
     } catch { /* ignore */ }
 }
 
-export function hasApiKey(id: ApiKeyId): boolean {
-    return getApiKey(id).length > 0
+const LLM_URL_KEY = 'mkon_llm_base_url'
+export const DEFAULT_LLM_BASE_URL = 'http://localhost:3001/v1'
+
+/** Normaliza para algo como https://host:porta/v1 (sem barra final). */
+export function normalizeLlmBaseUrl(raw: string): string {
+    let u = raw.trim().replace(/\/+$/, '')
+    if (!u) return DEFAULT_LLM_BASE_URL
+    if (!/^https?:\/\//i.test(u)) u = `http://${u}`
+    u = u.replace(/\/chat\/completions$/, '')
+    if (!/\/v1$/.test(u)) u += '/v1'
+    return u
 }
 
-/** Remove chaves antigas de providers descontinuados (Groq, Gemini). */
-function clearLegacyAiKeys() {
+export function getLlmBaseUrl(): string {
+    try { return normalizeLlmBaseUrl(localStorage.getItem(LLM_URL_KEY) ?? '') } catch { return DEFAULT_LLM_BASE_URL }
+}
+
+export function setLlmBaseUrl(value: string) {
     try {
-        for (const id of LEGACY_AI_KEYS) localStorage.removeItem(PREFIX + id)
+        if (value.trim()) localStorage.setItem(LLM_URL_KEY, normalizeLlmBaseUrl(value))
+        else localStorage.removeItem(LLM_URL_KEY)
     } catch { /* ignore */ }
+}
+
+export function hasApiKey(id: ApiKeyId): boolean {
+    return getApiKey(id).length > 0
 }
 
 function parseProviderFromKey(value: string): ApiKeyProvider | null {
     const trimmed = value.trim()
     if (!trimmed) return null
-    if (trimmed.startsWith('freellmapi-')) return 'unified'
+    if (trimmed.startsWith('gsk_')) return 'groq'
+    if (trimmed.startsWith('AIza')) return 'gemini'
     return null
 }
 
@@ -111,16 +74,14 @@ export function getUrlActivationCandidate(): { provider: ApiKeyProvider; value: 
         params.get('api_key') ??
         params.get('key') ??
         params.get('mkon_key') ??
-        params.get('unified') ??
-        params.get('freellmapi') ??
-        params.get('llm') ??
+        params.get('groq') ??
+        params.get('gemini') ??
+        params.get('google') ??
         ''
 
     if (!keyValue.trim()) return null
 
-    const explicitProvider = ['unified', 'free', 'openai', 'llm'].includes(providerParam)
-        ? 'unified' as ApiKeyProvider
-        : null
+    const explicitProvider = providerParam === 'groq' || providerParam === 'gemini' ? providerParam : null
     const inferredProvider = parseProviderFromKey(keyValue)
     const provider = explicitProvider ?? inferredProvider
     if (!provider) return null
@@ -130,27 +91,34 @@ export function getUrlActivationCandidate(): { provider: ApiKeyProvider; value: 
 
 export async function validateApiKey(provider: ApiKeyProvider, value: string): Promise<boolean> {
     try {
-        if (provider === 'unified') {
-            const baseUrl = getUnifiedBaseUrl()
-            const controller = new AbortController()
-            // Modelos locais (Ollama) podem demorar a carregar na primeira chamada.
-            const timer = setTimeout(() => controller.abort(), 120000)
-            try {
-                const res = await fetch(`${baseUrl}/chat/completions`, {
+        if (provider === 'groq') {
+            const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${value}` },
+                body: JSON.stringify({
+                    model: 'openai/gpt-oss-20b',
+                    messages: [{ role: 'user', content: 'ping' }],
+                    max_tokens: 8,
+                    temperature: 0,
+                }),
+            })
+            if (!res.ok) return false
+            return true
+        }
+
+        if (provider === 'gemini') {
+            const res = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${value}`,
+                {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${value}` },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: 'auto',
-                        messages: [{ role: 'user', content: 'ping' }],
-                        max_tokens: 8,
-                        temperature: 0,
+                        contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
+                        generationConfig: { maxOutputTokens: 8, temperature: 0 },
                     }),
-                    signal: controller.signal,
-                })
-                return res.ok
-            } finally {
-                clearTimeout(timer)
-            }
+                }
+            )
+            return res.ok
         }
 
         return false
@@ -168,42 +136,4 @@ export async function activateApiKeyFromUrl(): Promise<{ provider: ApiKeyProvide
 
     setApiKey(candidate.provider, candidate.value)
     return candidate
-}
-
-/** Garante uma chave FreeLLM disponível (browser, URL ou variável de ambiente). */
-export function ensureDefaultFreeLLMKey(): string | null {
-    try {
-        clearLegacyAiKeys()
-
-        const currentUnified = getApiKey('unified')
-        if (currentUnified) return currentUnified
-
-        if (typeof window !== 'undefined') {
-            const params = new URLSearchParams(window.location.search)
-            const urlKey = (
-                params.get('api_key') ??
-                params.get('key') ??
-                params.get('unified') ??
-                params.get('freellmapi') ??
-                params.get('mkon_key') ??
-                params.get('llm') ??
-                ''
-            ).trim()
-
-            if (urlKey) {
-                setApiKey('unified', urlKey)
-                return urlKey
-            }
-        }
-
-        const envUnified = DEFAULT_UNIFIED_KEY
-        if (envUnified) {
-            setApiKey('unified', envUnified)
-            return envUnified
-        }
-
-        return null
-    } catch {
-        return null
-    }
 }

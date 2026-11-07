@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Bot, Command, LogOut, Menu, OctagonAlert, PanelLeft, Plug, Search, Settings, Volume2, VolumeX, LayoutPanelLeft } from 'lucide-react'
-import { Button, Modal } from '@/components/ui'
-import { useToast } from '@/components/ui/Toast'
+import { Bell, Bot, Check, Command, Menu, Palette, Plug, Search, Settings, LogOut, OctagonAlert } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
+import { NAV } from '@/lib/nav'
 import { cn, relativeTime } from '@/lib/utils'
+import { Modal, Switch } from '@/components/ui'
+import { THEMES, useUiPrefs } from '@/lib/ui-prefs'
+import { useToast } from '@/components/ui/Toast'
 import { logActivity } from '@/lib/log'
-import { useUiPrefs } from '@/lib/uiPrefs'
 
 type Notification = { id: string; level: string; title: string; body: string | null; link: string | null; read_at: string | null; created_at: string }
 
@@ -38,7 +39,9 @@ export function Header({ onMenu, killSwitch, onKillChange, onNotifCount }: {
   const nav = useNavigate()
   const { admin, signOut } = useAuth()
   const toast = useToast()
-  const { sound, floating, toggleSound, toggleFloating } = useUiPrefs()
+  const { theme, setTheme, floating, setFloating } = useUiPrefs()
+  const [themeOpen, setThemeOpen] = useState(false)
+  const themeRef = useClickOutside(() => setThemeOpen(false))
   const [query, setQuery] = useState('')
   const [palette, setPalette] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -70,6 +73,7 @@ export function Header({ onMenu, killSwitch, onKillChange, onNotifCount }: {
     return () => clearInterval(t)
   }, [onNotifCount])
 
+  // Atalho Ctrl/Cmd+K
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(true) } }
     window.addEventListener('keydown', h)
@@ -85,7 +89,7 @@ export function Header({ onMenu, killSwitch, onKillChange, onNotifCount }: {
     onNotifCount(0)
   }
 
-  const submitSearch = (e: FormEvent) => {
+  const submitSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (query.trim()) nav(`/crm?q=${encodeURIComponent(query.trim())}`)
   }
@@ -101,145 +105,185 @@ export function Header({ onMenu, killSwitch, onKillChange, onNotifCount }: {
   }
 
   return (
-    <>
-      <header className="glass sticky top-0 z-20 flex h-14 items-center gap-3 border-x-0 border-t-0 bg-ink/70 px-4">
-        <button onClick={onMenu} className="rounded-md p-1.5 text-white/60 hover:bg-white/[0.06] lg:hidden" aria-label="Abrir menu">
-          <Menu className="h-5 w-5" />
+    <header className="glass sticky top-0 z-20 flex h-14 items-center gap-3 border-x-0 border-t-0 bg-ink/70 px-4">
+      <button onClick={onMenu} className="rounded-md p-1.5 text-white/60 hover:bg-white/[0.06] lg:hidden" aria-label="Abrir menu">
+        <Menu className="h-5 w-5" />
+      </button>
+
+      <form onSubmit={submitSearch} className="relative max-w-md flex-1">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Pesquisar empresas, leads…" aria-label="Pesquisa global" className="input !bg-white/[0.04] pl-9" />
+      </form>
+
+      <div className="ml-auto flex items-center gap-1.5">
+        <button
+          onClick={() => setPalette(true)}
+          className="hidden items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-white/50 transition hover:bg-white/[0.05] md:flex"
+          aria-label="Comando rápido"
+        >
+          <Command className="h-3.5 w-3.5" /> K
         </button>
 
-        <form onSubmit={submitSearch} className="relative max-w-md flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Pesquisar empresas, leads…" aria-label="Pesquisa global" className="input !bg-white/[0.04] pl-9" />
-        </form>
+        <button onClick={() => nav('/agentes')} title="Estado dos agentes de IA" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/60 hover:bg-white/[0.05] md:flex">
+          <Bot className="h-4 w-4" />
+          <span className={cn('h-1.5 w-1.5 rounded-full', agents.active > 0 ? 'bg-emerald-400' : 'bg-white/25')} />
+          {agents.active}/{agents.total}
+        </button>
 
-        <div className="ml-auto flex items-center gap-1.5">
-          <button onClick={toggleSound} title={sound ? 'Desativar efeitos sonoros' : 'Ativar efeitos sonoros'} aria-label={sound ? 'Desativar efeitos sonoros' : 'Ativar efeitos sonoros'} aria-pressed={sound} className={cn('hidden rounded-lg p-2 transition sm:flex', sound ? 'text-brand-soft hover:bg-white/[0.05]' : 'text-white/35 hover:bg-white/[0.05] hover:text-white/70')}>
-            {sound ? <Volume2 className="h-[18px] w-[18px]" /> : <VolumeX className="h-[18px] w-[18px]" />}
-          </button>
+        <button onClick={() => nav('/admin')} title="Estado das integrações" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/60 hover:bg-white/[0.05] md:flex">
+          <Plug className="h-4 w-4" />
+          <span className={cn('h-1.5 w-1.5 rounded-full', integrations.connected > 0 ? 'bg-emerald-400' : 'bg-amber-400')} />
+          {integrations.connected}/{integrations.total}
+        </button>
 
-          <button onClick={toggleFloating} title={floating ? 'Desativar menu flutuante' : 'Ativar menu flutuante'} aria-label={floating ? 'Desativar menu flutuante' : 'Ativar menu flutuante'} aria-pressed={floating} className={cn('hidden rounded-lg p-2 transition sm:flex', floating ? 'text-brand-soft hover:bg-white/[0.05]' : 'text-white/35 hover:bg-white/[0.05] hover:text-white/70')}>
-            {floating ? <PanelLeft className="h-[18px] w-[18px]" /> : <LayoutPanelLeft className="h-[18px] w-[18px]" />}
-          </button>
-
-          <button onClick={() => setPalette(true)} className="hidden items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-white/50 transition hover:bg-white/[0.05] md:flex" aria-label="Comando rápido">
-            <Command className="h-3.5 w-3.5" /> K
-          </button>
-
-          <button onClick={() => nav('/agentes')} title="Estado dos agentes de IA" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/60 hover:bg-white/[0.05] md:flex">
-            <Bot className="h-4 w-4" />
-            <span className={cn('h-1.5 w-1.5 rounded-full', agents.active > 0 ? 'bg-emerald-400' : 'bg-white/25')} />
-            {agents.active}/{agents.total}
-          </button>
-
-          <button onClick={() => nav('/admin')} title="Estado das integrações" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/60 hover:bg-white/[0.05] md:flex">
-            <Plug className="h-4 w-4" />
-            <span className={cn('h-1.5 w-1.5 rounded-full', integrations.connected > 0 ? 'bg-emerald-400' : 'bg-amber-400')} />
-            {integrations.connected}/{integrations.total}
-          </button>
-
-          <button onClick={() => setConfirmKill(true)} title={killSwitch ? 'Automação PARADA' : 'Parar todas as atividades automáticas'} className={cn('flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition', killSwitch ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-white/10 text-white/60 hover:bg-white/[0.05]')}>
-            <OctagonAlert className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{killSwitch ? 'Parado' : 'Emergência'}</span>
-          </button>
-
-          <div ref={notifRef} className="relative">
-            <button onClick={() => setNotifOpen((v) => !v)} className="relative rounded-lg p-2 text-white/60 hover:bg-white/[0.05] hover:text-white/80" aria-label="Notificações">
-              <Bell className="h-[18px] w-[18px]" />
-              {unread > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-semibold text-white">{unread > 9 ? '9+' : unread}</span>}
-            </button>
-
-            {notifOpen && (
-              <div className="absolute right-0 top-full mt-2 w-[360px] rounded-2xl border border-white/10 bg-[#101418]/95 p-2 shadow-2xl backdrop-blur-xl">
-                <div className="mb-2 flex items-center justify-between px-2 pt-1">
-                  <div>
-                    <p className="text-sm font-medium">Notificações</p>
-                    <p className="text-[11px] text-white/40">{unread} por ler</p>
-                  </div>
-                  <button onClick={markAllRead} className="text-[11px] text-brand-soft hover:underline">Marcar tudo como lido</button>
-                </div>
-                <div className="max-h-[320px] space-y-2 overflow-y-auto">
-                  {notifs.length === 0 ? (
-                    <div className="px-3 py-6 text-center text-xs text-white/45">Sem notificações recentes.</div>
-                  ) : (
-                    notifs.map((n) => (
-                      <button key={n.id} onClick={() => n.link && nav(n.link)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-3 text-left transition hover:bg-white/[0.04]">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className={cn('h-2 w-2 rounded-full', n.level === 'danger' ? 'bg-red-400' : n.level === 'warning' ? 'bg-amber-400' : 'bg-emerald-400')} />
-                              <p className="text-xs font-medium text-white/80">{n.title}</p>
-                            </div>
-                            {n.body && <p className="mt-1 text-[11px] leading-relaxed text-white/45">{n.body}</p>}
-                          </div>
-                          {!n.read_at && <span className="mt-1 h-2 w-2 rounded-full bg-brand-soft" />}
-                        </div>
-                        <div className="mt-2 text-[10px] text-white/35">{relativeTime(n.created_at)}</div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div ref={profileRef} className="relative">
-            <button onClick={() => setProfileOpen((v) => !v)} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-2 py-1.5 text-left hover:bg-white/[0.05]">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand/15 text-[11px] font-semibold text-brand-soft">{admin?.full_name?.[0]?.toUpperCase() ?? 'P'}</div>
-              <div className="hidden text-left sm:block">
-                <div className="text-[11px] font-medium text-white/80">{admin?.full_name ?? 'Proprietário'}</div>
-                <div className="text-[10px] text-white/35">{admin ? 'owner' : 'Proprietário'}</div>
-              </div>
-            </button>
-
-            {profileOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border border-white/10 bg-[#101418]/95 p-2 shadow-2xl backdrop-blur-xl">
-                <div className="mb-2 border-b border-white/5 px-2 pb-2">
-                  <p className="text-sm font-medium text-white/90">{admin?.full_name ?? 'Conta'}</p>
-                  <p className="text-[11px] text-white/40">{admin?.email ?? 'owner@local'}</p>
-                </div>
-                <button onClick={() => nav('/admin')} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-white/70 hover:bg-white/[0.04]">
-                  <Settings className="h-4 w-4" /> Configurações
-                </button>
-                <button onClick={() => signOut()} className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-red-200 hover:bg-red-500/10">
-                  <LogOut className="h-4 w-4" /> Sair
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Emergência */}
+        <button
+          onClick={() => setConfirmKill(true)}
+          title={killSwitch ? 'Automação PARADA — clique para libertar' : 'Parar todas as atividades automáticas'}
+          className={cn(
+            'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition',
+            killSwitch ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-white/10 text-white/50 hover:border-red-500/40 hover:text-red-300',
+          )}
+        >
+          <OctagonAlert className="h-4 w-4" />
+          <span className="hidden sm:inline">{killSwitch ? 'Parado' : 'Emergência'}</span>
+        </button>
 
         <Clock />
-      </header>
 
-      <Modal open={palette} onClose={() => setPalette(false)} title="Comando rápido" wide>
-        <div className="space-y-3">
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar módulos, clientes, relatórios…" className="input w-full" autoFocus />
-          <div className="grid gap-2 sm:grid-cols-2">
-            {[
-              { label: 'Dashboard', path: '/' },
-              { label: 'CRM', path: '/crm' },
-              { label: 'Agentes', path: '/agentes' },
-              { label: 'Admin', path: '/admin' },
-            ].map((item) => (
-              <button key={item.path} onClick={() => { setPalette(false); nav(item.path) }} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-left text-sm text-white/80 hover:bg-white/[0.05]">
-                {item.label}
+        {/* Notificações */}
+        <div ref={notifRef} className="relative">
+          <button onClick={() => setNotifOpen((v) => !v)} className="relative rounded-lg p-2 text-white/60 hover:bg-white/[0.05]" aria-label="Notificações">
+            <Bell className="h-[18px] w-[18px]" />
+            {unread > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-brand ring-2 ring-ink" />}
+          </button>
+          {notifOpen && (
+            <div className="card absolute right-0 mt-2 w-80 animate-scale-in overflow-hidden bg-graphite shadow-2xl">
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+                <span className="text-sm font-semibold">Notificações</span>
+                {unread > 0 && <button onClick={markAllRead} className="text-xs text-brand-soft hover:underline">Marcar como lidas</button>}
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {notifs.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-xs text-white/40">Sem notificações.</p>
+                ) : notifs.map((n) => (
+                  <button key={n.id} onClick={() => { setNotifOpen(false); if (n.link) nav(n.link) }} className="block w-full border-b border-white/[0.04] px-4 py-3 text-left hover:bg-white/[0.03]">
+                    <div className="flex items-center gap-2">
+                      {!n.read_at && <span className="h-1.5 w-1.5 rounded-full bg-brand" />}
+                      <span className="text-[13px] font-medium">{n.title}</span>
+                    </div>
+                    {n.body && <p className="mt-0.5 text-xs text-white/45">{n.body}</p>}
+                    <p className="mt-1 text-[10px] text-white/30">{relativeTime(n.created_at)}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Aparência: cor do tema + menu flutuante */}
+        <div ref={themeRef} className="relative">
+          <button onClick={() => setThemeOpen((v) => !v)} className="rounded-lg p-2 text-white/60 hover:bg-white/[0.05]" aria-label="Aparência" aria-expanded={themeOpen} title="Cor do tema">
+            <Palette className="h-[18px] w-[18px]" />
+          </button>
+          {themeOpen && (
+            <div className="card absolute right-0 mt-2 w-64 animate-scale-in bg-graphite p-4 shadow-2xl">
+              <p className="text-sm font-semibold">Cor do tema</p>
+              <div className="mt-3 grid grid-cols-4 gap-2" role="radiogroup" aria-label="Cor do tema">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.id}
+                    role="radio"
+                    aria-checked={theme === t.id}
+                    aria-label={t.label}
+                    title={t.label}
+                    onClick={() => setTheme(t.id)}
+                    className="group flex flex-col items-center gap-1.5 focus:outline-none"
+                  >
+                    <span
+                      className={cn(
+                        'flex h-9 w-9 items-center justify-center rounded-full border transition group-focus-visible:ring-2 group-focus-visible:ring-brand/60',
+                        theme === t.id ? 'border-brand ring-2 ring-brand/40' : 'border-white/20 group-hover:border-white/40',
+                      )}
+                      style={{ background: t.swatch }}
+                    >
+                      {theme === t.id && <Check className="h-4 w-4" style={{ color: t.id === 'branco' || t.id === 'laranja' ? '#18181B' : '#FFFFFF' }} />}
+                    </span>
+                    <span className="text-center text-[10px] leading-tight text-white/50">{t.short}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-3">
+                <div>
+                  <p className="text-[13px] font-medium">Menu flutuante</p>
+                  <p className="text-[11px] text-white/40">Solto sobre a página, transparente</p>
+                </div>
+                <span className="hidden lg:block"><Switch checked={floating} onChange={setFloating} label="Menu flutuante" /></span>
+                <span className="text-[10px] text-white/30 lg:hidden">só em ecrãs grandes</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button onClick={() => nav('/admin')} className="rounded-lg p-2 text-white/60 hover:bg-white/[0.05]" aria-label="Configurações">
+          <Settings className="h-[18px] w-[18px]" />
+        </button>
+
+        {/* Perfil */}
+        <div ref={profileRef} className="relative">
+          <button onClick={() => setProfileOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/20 text-xs font-semibold text-brand-soft ring-1 ring-brand/30" aria-label="Perfil">
+            {(admin?.full_name ?? 'A').slice(0, 1).toUpperCase()}
+          </button>
+          {profileOpen && (
+            <div className="card absolute right-0 mt-2 w-60 animate-scale-in bg-graphite p-1.5 shadow-2xl">
+              <div className="px-3 py-2">
+                <p className="text-sm font-medium">{admin?.full_name ?? 'Administrador'}</p>
+                <p className="truncate text-xs text-white/40">{admin?.email}</p>
+                <p className="mt-1.5 text-[10px] uppercase tracking-wider text-brand-soft">Proprietário</p>
+              </div>
+              <button onClick={() => signOut()} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-white/70 hover:bg-white/[0.05]">
+                <LogOut className="h-4 w-4" /> Terminar sessão
               </button>
-            ))}
-          </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Paleta de comandos */}
+      <Modal open={palette} onClose={() => setPalette(false)} title="Comando rápido">
+        <div className="space-y-1">
+          {NAV.map(({ to, label, icon: Icon, description }) => (
+            <button key={to} onClick={() => { setPalette(false); nav(to) }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-white/[0.05]">
+              <Icon className="h-4 w-4 text-brand-soft" />
+              <div>
+                <div className="text-sm">{label}</div>
+                <div className="text-xs text-white/40">{description}</div>
+              </div>
+            </button>
+          ))}
         </div>
       </Modal>
 
-      <Modal open={confirmKill} onClose={() => setConfirmKill(false)} title={killSwitch ? 'Reativar automações' : 'Parar automações'}>
-        <div className="space-y-4">
-          <p className="text-sm text-white/70">
-            {killSwitch ? 'Deseja reativar todas as automações e envios do sistema?' : 'Deseja interromper todas as automações e envios do sistema?'}
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setConfirmKill(false)}>Cancelar</Button>
-            <Button variant={killSwitch ? 'primary' : 'danger'} onClick={toggleKill}>{killSwitch ? 'Reativar' : 'Parar'}</Button>
-          </div>
-        </div>
+      {/* Confirmação do botão de emergência */}
+      <Modal
+        open={confirmKill}
+        onClose={() => setConfirmKill(false)}
+        title={killSwitch ? 'Libertar atividades automáticas?' : 'Parar todas as atividades automáticas?'}
+        footer={
+          <>
+            <button onClick={() => setConfirmKill(false)} className="rounded-lg px-3.5 py-2 text-sm text-white/70 hover:bg-white/[0.06]">Cancelar</button>
+            <button onClick={toggleKill} className={cn('rounded-lg px-3.5 py-2 text-sm font-medium', killSwitch ? 'bg-brand text-on-brand' : 'bg-red-500 text-[#ffffff]')}>
+              {killSwitch ? 'Libertar' : 'Parar tudo'}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-white/60">
+          {killSwitch
+            ? 'As automações e o envio de mensagens poderão voltar a funcionar, respeitando o modo configurado.'
+            : 'Bloqueia imediatamente o envio de mensagens e qualquer automação ou agente a correr. A proteção é aplicada também na base de dados.'}
+        </p>
       </Modal>
-    </>
+    </header>
   )
 }

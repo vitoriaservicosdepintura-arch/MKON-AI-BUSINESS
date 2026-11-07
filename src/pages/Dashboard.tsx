@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useUiPrefs } from '@/lib/ui-prefs'
 import { useNavigate } from 'react-router-dom'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -24,8 +25,6 @@ type Task = { status: string; ai_agents: { name: string } | null }
 type Log = { id: number; action: string; entity_type: string | null; created_at: string }
 
 const CHART = { grid: 'rgba(255,255,255,0.06)', axis: 'rgba(255,255,255,0.35)' }
-const PALETTE = ['#E58A32', '#F3A34F', '#8B8F98', '#5C6068', '#C96F1A', '#3B3F46']
-const tip = { contentStyle: { background: '#1B1D21', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10, fontSize: 12 }, cursor: { fill: 'rgba(255,255,255,0.04)' } }
 
 const monthKey = (iso: string) => iso.slice(0, 7)
 const monthLabel = (k: string) => new Date(k + '-01').toLocaleDateString('pt-PT', { month: 'short' })
@@ -120,6 +119,9 @@ function ConfigBanner() {
 }
 
 export default function Dashboard() {
+  const { chart } = useUiPrefs()
+  const PALETTE = chart.palette
+  const tip = chart.tip
   const nav = useNavigate()
   const demo = isDemoActive()
   const [loading, setLoading] = useState(!demo)
@@ -258,9 +260,9 @@ export default function Dashboard() {
       <div className="mt-6 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <ChartCard title="Evolução de leads" subtitle="Últimos 6 meses" loading={loading} empty={m.leadsByMonth.every((x) => x.leads === 0)}>
           <ResponsiveContainer><AreaChart data={m.leadsByMonth}>
-            <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#E58A32" stopOpacity={0.35} /><stop offset="100%" stopColor="#E58A32" stopOpacity={0} /></linearGradient></defs>
+            <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={chart.brand} stopOpacity={0.35} /><stop offset="100%" stopColor={chart.brand} stopOpacity={0} /></linearGradient></defs>
             <CartesianGrid stroke={CHART.grid} vertical={false} /><XAxis dataKey="mes" stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} /><YAxis allowDecimals={false} stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} width={28} />
-            <Tooltip {...tip} /><Area type="monotone" dataKey="leads" name="Leads" stroke="#E58A32" strokeWidth={2} fill="url(#g)" />
+            <Tooltip {...tip} /><Area type="monotone" dataKey="leads" name="Leads" stroke={chart.brand} strokeWidth={2} fill="url(#g)" />
           </AreaChart></ResponsiveContainer>
         </ChartCard>
 
@@ -268,14 +270,14 @@ export default function Dashboard() {
           <ResponsiveContainer><BarChart data={m.funnel} layout="vertical" margin={{ left: 20 }}>
             <CartesianGrid stroke={CHART.grid} horizontal={false} /><XAxis type="number" allowDecimals={false} stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} />
             <YAxis type="category" dataKey="etapa" stroke={CHART.axis} fontSize={10} width={110} tickLine={false} axisLine={false} />
-            <Tooltip {...tip} /><Bar dataKey="total" name="Leads" fill="#E58A32" radius={[0, 4, 4, 0]} />
+            <Tooltip {...tip} /><Bar dataKey="total" name="Leads" fill={chart.brand} radius={[0, 4, 4, 0]} />
           </BarChart></ResponsiveContainer>
         </ChartCard>
 
         <ChartCard title="Vendas mensais" subtitle="Valor das vendas registadas" loading={loading} empty={m.salesByMonth.every((x) => x.valor === 0)}>
           <ResponsiveContainer><BarChart data={m.salesByMonth}>
             <CartesianGrid stroke={CHART.grid} vertical={false} /><XAxis dataKey="mes" stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} /><YAxis stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} width={44} />
-            <Tooltip {...tip} formatter={(v: number) => eur(v)} /><Bar dataKey="valor" name="Vendas" fill="#E58A32" radius={[4, 4, 0, 0]} />
+            <Tooltip {...tip} formatter={(v: number) => eur(v)} /><Bar dataKey="valor" name="Vendas" fill={chart.brand} radius={[4, 4, 0, 0]} />
           </BarChart></ResponsiveContainer>
         </ChartCard>
 
@@ -288,7 +290,7 @@ export default function Dashboard() {
         <ChartCard title="Desempenho dos agentes de IA" subtitle="Tarefas executadas" loading={loading} empty={m.agentPerf.length === 0}>
           <ResponsiveContainer><BarChart data={m.agentPerf}>
             <CartesianGrid stroke={CHART.grid} vertical={false} /><XAxis dataKey="agente" stroke={CHART.axis} fontSize={10} tickLine={false} axisLine={false} /><YAxis allowDecimals={false} stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} width={28} />
-            <Tooltip {...tip} /><Bar dataKey="concluidas" name="Concluídas" stackId="a" fill="#E58A32" /><Bar dataKey="falhadas" name="Falhadas" stackId="a" fill="#5C6068" radius={[4, 4, 0, 0]} />
+            <Tooltip {...tip} /><Bar dataKey="concluidas" name="Concluídas" stackId="a" fill={chart.brand} /><Bar dataKey="falhadas" name="Falhadas" stackId="a" fill="#5C6068" radius={[4, 4, 0, 0]} />
           </BarChart></ResponsiveContainer>
         </ChartCard>
 
@@ -302,7 +304,7 @@ export default function Dashboard() {
           <ChartCard title="Evolução das propostas" subtitle="Criadas vs. aprovadas" loading={loading} empty={m.proposalsByMonth.every((x) => x.enviadas === 0)}>
             <ResponsiveContainer><BarChart data={m.proposalsByMonth}>
               <CartesianGrid stroke={CHART.grid} vertical={false} /><XAxis dataKey="mes" stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} /><YAxis allowDecimals={false} stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} width={28} />
-              <Tooltip {...tip} /><Bar dataKey="enviadas" name="Criadas" fill="#5C6068" radius={[4, 4, 0, 0]} /><Bar dataKey="aprovadas" name="Aprovadas" fill="#E58A32" radius={[4, 4, 0, 0]} />
+              <Tooltip {...tip} /><Bar dataKey="enviadas" name="Criadas" fill="#5C6068" radius={[4, 4, 0, 0]} /><Bar dataKey="aprovadas" name="Aprovadas" fill={chart.brand} radius={[4, 4, 0, 0]} />
             </BarChart></ResponsiveContainer>
           </ChartCard>
         </div>

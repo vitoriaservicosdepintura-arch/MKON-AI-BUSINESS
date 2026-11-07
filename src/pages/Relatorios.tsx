@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useUiPrefs } from '@/lib/ui-prefs'
 import { BarChart3, Download } from 'lucide-react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { supabase } from '@/lib/supabase'
@@ -7,8 +8,6 @@ import { cn, eur } from '@/lib/utils'
 import { isDemoActive, DEMO } from '@/lib/demo'
 
 const CHART = { grid: 'rgba(255,255,255,0.06)', axis: 'rgba(255,255,255,0.35)' }
-const PALETTE = ['#E58A32', '#F3A34F', '#8B8F98', '#5C6068', '#C96F1A', '#3B3F46', '#6B7280', '#D97706']
-const tip = { contentStyle: { background: '#1B1D21', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10, fontSize: 12 }, cursor: { fill: 'rgba(255,255,255,0.04)' } }
 
 const monthKey = (iso: string) => iso.slice(0, 7)
 const monthLabel = (k: string) => new Date(k + '-01').toLocaleDateString('pt-PT', { month: 'short', year: '2-digit' })
@@ -30,6 +29,9 @@ const PERIOD_OPTIONS = [
 ]
 
 export default function Relatorios() {
+  const { chart } = useUiPrefs()
+  const PALETTE = chart.palette
+  const tip = chart.tip
     const demo = isDemoActive()
     const [period, setPeriod] = useState(6)
     const [loading, setLoading] = useState(!demo)
@@ -156,7 +158,7 @@ export default function Relatorios() {
                             <XAxis dataKey="mes" stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} />
                             <YAxis stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} width={44} />
                             <Tooltip {...tip} formatter={(v: number) => eur(v)} />
-                            <Bar dataKey="receita" name="Receita" fill="#E58A32" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="receita" name="Receita" fill={chart.brand} radius={[4, 4, 0, 0]} />
                             <Bar dataKey="despesa" name="Despesa" fill="#5C6068" radius={[4, 4, 0, 0]} />
                         </BarChart>
                     </ResponsiveContainer>
@@ -196,7 +198,7 @@ export default function Relatorios() {
                             <XAxis type="number" allowDecimals={false} stroke={CHART.axis} fontSize={11} tickLine={false} axisLine={false} />
                             <YAxis type="category" dataKey="name" stroke={CHART.axis} fontSize={10} width={120} tickLine={false} axisLine={false} />
                             <Tooltip {...tip} />
-                            <Bar dataKey="value" name="Leads" fill="#E58A32" radius={[0, 4, 4, 0]} />
+                            <Bar dataKey="value" name="Leads" fill={chart.brand} radius={[0, 4, 4, 0]} />
                         </BarChart>
                     </ResponsiveContainer>
                 </ChartCard>

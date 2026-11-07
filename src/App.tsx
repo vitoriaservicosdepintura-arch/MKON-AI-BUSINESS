@@ -17,7 +17,8 @@ import NfcPage from '@/pages/Nfc'
 import Projetos from '@/pages/Projetos'
 import Financeiro from '@/pages/Financeiro'
 import Relatorios from '@/pages/Relatorios'
-import { activateApiKeyFromUrl, ensureDefaultFreeLLMKey } from '@/lib/apikeys'
+import { activateApiKeyFromUrl } from '@/lib/apikeys'
+import { UiPrefsProvider } from '@/lib/ui-prefs'
 
 function UrlKeyActivator() {
   const toast = useToast()
@@ -27,12 +28,11 @@ function UrlKeyActivator() {
     let active = true
 
     async function run() {
-      const forced = ensureDefaultFreeLLMKey()
       const candidate = await activateApiKeyFromUrl()
       if (!active) return
 
-      if (forced || candidate) {
-        toast.push('success', 'FreeLLM ativada e pronta para uso em todos os módulos.')
+      if (candidate) {
+        toast.push('success', `${candidate.provider === 'groq' ? 'Groq' : 'Gemini'} ativada e pronta para uso em todos os módulos.`)
       }
 
       setReady(true)
@@ -72,6 +72,7 @@ function Protected() {
 
 export default function App() {
   return (
+    <UiPrefsProvider>
     <ToastProvider>
       <UrlKeyActivator />
       <AuthProvider>
@@ -97,5 +98,6 @@ export default function App() {
         </BrowserRouter>
       </AuthProvider>
     </ToastProvider>
+    </UiPrefsProvider>
   )
 }

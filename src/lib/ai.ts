@@ -1,25 +1,36 @@
 /**
- * MKON AI — Serviço central de IA
- * Usa a chave FreeLLM (API unificada OpenAI-compatible).
- * Expõe askAI() para todos os módulos do sistema.
+ * MKON AI — Serviço central de IA.
+ * Ordem de preferência: FreeLLMAPI (chave unificada) → Groq → Gemini.
+ * Todos os módulos (bot, agentes, prospeção…) passam por chatAI()/askAI().
  */
 
-import { DEFAULT_UNIFIED_KEY, ensureDefaultFreeLLMKey, getApiKey, getUnifiedBaseUrl, setApiKey } from './apikeys'
+import { getApiKey } from './apikeys'
+import { isFreeLlmConfigured, llmChat, type ChatMsg } from './llm'
 
-/* ── Modelos disponíveis ──
- * A instância FreeLLMAPI local expõe o modelo virtual `auto`, que escolhe o
- * melhor provider disponível. Nomes fixos de modelos externos não existem
- * numa instalação local, por isso `auto` é o modelo predefinido.
- */
-export const UNIFIED_DEFAULT_MODEL = 'auto'
+export type { ChatMsg } from './llm'
+export type AiProvider = 'freellm' | 'groq' | 'gemini'
 
-const UNIFIED_MODEL_FALLBACKS = ['auto']
+export type AiResult = {
+    text: string
+    provider: AiProvider
+    model: string
+    routedVia: string | null
+    inputTokens: number
+    outputTokens: number
+}
 
-export function getActiveProvider(): 'unified' | null {
-    const unifiedKey = getApiKey('unified')
-    if (unifiedKey) return 'unified'
-    const forced = ensureDefaultFreeLLMKey()
-    if (forced) return 'unified'
+export type AiOptions = { model?: string; temperature?: number; maxTokens?: number }
+
+/* ── Modelos de reserva (planos gratuitos) ── */
+export const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-20b'
+export const GEMINI_DEFAULT_MODEL = 'gemini-2.0-flash'
+const GROQ_MODEL_FALLBACKS = [GROQ_DEFAULT_MODEL, 'openai/gpt-oss-120b']
+const GEMINI_MODEL_FALLBACKS = [GEMINI_DEFAULT_MODEL, 'gemini-2.5-flash', 'gemini-1.5-flash']
+
+export function getActiveProvider(): AiProvider | null {
+    if (isFreeLlmConfigured()) return 'freellm'
+    if (getApiKey('groq').startsWith('gsk_')) return 'groq'
+    if (getApiKey('gemini').startsWith('AIza')) return 'gemini'
     return null
 }
 
@@ -28,77 +39,85 @@ export function isAiReady(): boolean {
 }
 
 export function getProviderLabel(): string {
-    const p = getActiveProvider()
-    if (p === 'unified') return 'FreeLLM / Unified API'
-    return 'Sem IA configurada'
+    switch (getActiveProvider()) {
+        case 'freellm': return 'FreeLLMAPI (chave unificada)'
+        case 'groq': return 'Groq'
+        case 'gemini': return 'Google Gemini Flash'
+        default: return 'Sem IA configurada'
+    }
 }
 
-/** Chaves a tentar: a guardada no browser e, em alternativa, a do .env. */
-function apiKeyCandidates(): string[] {
-    const keys = [getApiKey('unified'), DEFAULT_UNIFIED_KEY].filter((k) => k.trim().length > 0)
-    return [...new Set(keys)]
-}
-
-async function callUnified(systemPrompt: string, userPrompt: string, model = UNIFIED_DEFAULT_MODEL): Promise<string> {
-    const keys = apiKeyCandidates()
-    if (keys.length === 0) throw new Error('Chave unificada não configurada')
-
-    const baseUrl = getUnifiedBaseUrl()
+/* ── Groq (reserva) ── */
+async function callGroq(messages: ChatMsg[], o: AiOptions): Promise<AiResult> {
+    const apiKey = getApiKey('groq')
     let lastError: Error | null = null
-
-    for (const apiKey of keys) {
-        for (const modelName of [model, ...UNIFIED_MODEL_FALLBACKS.filter((m) => m !== model)]) {
-            try {
-                const res = await fetch(`${baseUrl}/chat/completions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-                    body: JSON.stringify({
-                        model: modelName,
-                        messages: [
-                            { role: 'system', content: systemPrompt },
-                            { role: 'user', content: userPrompt },
-                        ],
-                        temperature: 0.6,
-                        max_tokens: 1500,
-                    }),
-                })
-
-                if (!res.ok) {
-                    const e = await res.json().catch(() => ({}))
-                    const msg = e?.error?.message ?? `Unified error ${res.status}`
-                    lastError = new Error(msg)
-                    // Chave recusada (ex.: chave de uma instância antiga): tenta a próxima.
-                    if (res.status === 401) break
-                    if (res.status !== 404 && res.status !== 400) throw lastError
-                    continue
-                }
-
-                const data = await res.json()
-                const content = (data.choices?.[0]?.message?.content ?? '').trim()
-                if (!content) throw new Error('Unified retornou resposta vazia')
-                // A chave que funcionou passa a ser a ativa.
-                if (getApiKey('unified') !== apiKey) setApiKey('unified', apiKey)
-                return content
-        } catch (error) {
-            lastError = error instanceof Error ? error : new Error(String(error))
-            if (lastError.name === 'TypeError') {
-                throw new Error(`Não foi possível contactar a API FreeLLM em ${baseUrl}. Confirme que a instância FreeLLMAPI está a correr e que o endereço está correto (Administração → Integrações).`)
-            }
-            const retryable = /model|not found|unsupported|no enabled|routing exhausted|no upstream/i.test(lastError.message)
-            if (retryable) continue
+    for (const model of GROQ_MODEL_FALLBACKS) {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ model, messages, temperature: o.temperature ?? 0.6, max_tokens: o.maxTokens ?? 1500 }),
+        })
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}))
+            lastError = new Error(e?.error?.message ?? `Groq error ${res.status}`)
+            if (res.status === 404 || res.status === 400) continue
             throw lastError
         }
-        }
+        const data = await res.json()
+        const text = (data.choices?.[0]?.message?.content ?? '').trim()
+        if (!text) throw new Error('Groq retornou resposta vazia')
+        return { text, provider: 'groq', model, routedVia: `groq/${model}`, inputTokens: data.usage?.prompt_tokens ?? 0, outputTokens: data.usage?.completion_tokens ?? 0 }
     }
-
-    throw lastError ?? new Error('Unified não respondeu corretamente.')
+    throw lastError ?? new Error('Groq não respondeu corretamente.')
 }
 
-/* ── askAI: função principal — usa a chave FreeLLM ── */
-export async function askAI(systemPrompt: string, userPrompt: string): Promise<string> {
+/* ── Gemini (reserva) ── */
+async function callGemini(messages: ChatMsg[], o: AiOptions): Promise<AiResult> {
+    const apiKey = getApiKey('gemini')
+    const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
+    const contents = messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }))
+    let lastError: Error | null = null
+    for (const model of GEMINI_MODEL_FALLBACKS) {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+            body: JSON.stringify({
+                ...(system ? { system_instruction: { parts: [{ text: system }] } } : {}),
+                contents,
+                generationConfig: { temperature: o.temperature ?? 0.6, maxOutputTokens: o.maxTokens ?? 1500 },
+            }),
+        })
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}))
+            lastError = new Error(e?.error?.message ?? `Gemini error ${res.status}`)
+            if (res.status === 404 || res.status === 400) continue
+            throw lastError
+        }
+        const data = await res.json()
+        const text = (data.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim()
+        if (!text) throw new Error('Gemini retornou resposta vazia')
+        return { text, provider: 'gemini', model, routedVia: `gemini/${model}`, inputTokens: data.usageMetadata?.promptTokenCount ?? 0, outputTokens: data.usageMetadata?.candidatesTokenCount ?? 0 }
+    }
+    throw lastError ?? new Error('Gemini não respondeu corretamente.')
+}
+
+/** Conversa completa (com histórico) através do melhor fornecedor disponível. */
+export async function chatAI(messages: ChatMsg[], o: AiOptions = {}): Promise<AiResult> {
     const provider = getActiveProvider()
-    if (!provider) throw new Error('Nenhuma chave de IA configurada. Adicione a chave FreeLLM em Administração → Integrações.')
-    return callUnified(systemPrompt, userPrompt)
+    if (!provider) throw new Error('Nenhuma chave de IA configurada. Adicione a chave FreeLLMAPI em Administração → Integrações.')
+    if (provider === 'freellm') {
+        const r = await llmChat({ messages, model: o.model, temperature: o.temperature, maxTokens: o.maxTokens })
+        return { text: r.text, provider, model: r.model ?? o.model ?? 'auto', routedVia: r.routedVia, inputTokens: r.inputTokens, outputTokens: r.outputTokens }
+    }
+    return provider === 'groq' ? callGroq(messages, o) : callGemini(messages, o)
+}
+
+/** Pergunta única (sistema + utilizador) → texto. */
+export async function askAI(systemPrompt: string, userPrompt: string, o: AiOptions = {}): Promise<string> {
+    const r = await chatAI([{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], o)
+    return r.text
 }
 
 /* ═══════════════════════════════════════════════════════════

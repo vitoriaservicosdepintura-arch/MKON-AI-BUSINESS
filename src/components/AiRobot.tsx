@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle, Volume2, VolumeX, Mic, MicOff } from 'lucide-react'
+import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getApiKey, hasApiKey, getUnifiedBaseUrl } from '@/lib/apikeys'
-import { UNIFIED_DEFAULT_MODEL } from '@/lib/ai'
-import { speak, stopSpeaking, setVoiceEnabled } from '@/lib/voice'
-import { loadSystemSnapshot, formatSystemContext, detectNavigationCommand, MODULE_KNOWLEDGE, type SystemSnapshot } from '@/lib/systemContext'
-import { playBotOpen, playBotClose } from '@/lib/sfx'
+import { chatAI, getActiveProvider, getProviderLabel, isAiReady } from '@/lib/ai'
+import { FREELLM_MODELS } from '@/lib/llm'
 
 /* ─── Types ─── */
 interface Message {
@@ -17,78 +13,26 @@ interface Message {
 }
 
 /* ─── System context ─── */
-const SYSTEM_PROMPT = `Você é o MKON Bot — a inteligência central privada do sistema MKON AI Business, inspirado no J.A.R.V.I.S.
-
-PERSONALIDADE:
-- Trata sempre o utilizador por "senhor". É formal, sereno, eficiente e leal.
-- Responde em Português de Portugal, com frases curtas e práticas.
-- Saudações de ativação soam a J.A.R.V.I.S.: "Sistemas operacionais, senhor."
-- Fala com tom profissional, caloroso e feminino, natural e humano.
+const SYSTEM_PROMPT = `Você é o MKON Bot — assistente de IA privado do sistema MKON AI Business.
+Você tem acesso total ao contexto da plataforma:
 
 PLATAFORMA MKON AI BUSINESS:
-- Sistema privado de gestão para uma agência de serviços digitais (websites, NFC, SEO) em Portugal.
-- Stack: React + TypeScript + Supabase (PostgreSQL + RLS + Auth) + Vite + Tailwind.
-- Módulos: Dashboard, Prospecção, Agentes de IA, Mensagens, CRM, Websites, Propostas, NFC, Projetos, Financeiro, Relatórios e Administração.
-- Categorias e áreas: clientes, leads, empresas, campanhas, propostas, pedidos, faturação, pagamentos, tarefas, automações, integrações, indicadores, segurança, backup, dados e RGPD.
+- Sistema privado de gestão de negócio para agência de serviços digitais (websites, NFC, SEO)
+- Módulos: Dashboard, CRM (empresas/leads), Prospeção, Agentes IA, Mensagens, Websites, Propostas, NFC, Projetos, Financeiro, Relatórios, Administração
+- Stack: React + TypeScript + Supabase (PostgreSQL + RLS + Auth) + Vite + Tailwind
+- Base de dados: administradores, companies, leads, contacts, proposals, sales, projects, expenses, transactions, ai_agents, ai_tasks, integrations, nfc_devices, websites, conversations, messages
 
-CAPACIDADES:
-- Reconhece todos os módulos, categorias, campos, indicadores e fluxos do sistema.
-- Analisa qualquer categoria do negócio: leads, clientes, faturação, campanhas, projetos, propostas, websites, atas, tarefas, automações, relatórios, regras de negócio, alertas e segurança.
-- Navega: se o utilizador disser "abre o financeiro" ou "mostra os leads", o sistema abre a página.
-- Ajuda a otimizar processos, priorizar oportunidades, explicar KPI, interpretar dados, criar textos, propostas e mensagens, e explicar SQL e código.
-- Ajuda a configurar integrações (FreeLLM, Google Places, WhatsApp, n8n).
-- Nunca inventa números: se não tiver o dado, indica o módulo onde consultar.
-- Quando o senhor pedir uma análise, responde em contexto da categoria e sugere o próximo passo concreto.
+CAPACIDADES DO BOT:
+- Analisar e explicar qualquer módulo do sistema
+- Ajudar a criar queries SQL para o Supabase
+- Sugerir melhorias de código ou fluxo de negócio
+- Responder perguntas sobre os dados e como usar o sistema
+- Ajudar a configurar integrações (FreeLLMAPI, Groq, Gemini, OpenAI, Google Places, WhatsApp, n8n)
+- Criar conteúdos (textos, emails, propostas, mensagens de prospeção)
+- Analisar estratégias comerciais
 
-Responda sempre em Português de Portugal, com linguagem natural e clara.`
-/* ─── FreeLLM (OpenAI-compatible) models ─── */
-const UNIFIED_MODELS = [
-    { id: 'auto', label: 'Auto (router FreeLLM)' },
-    { id: 'fusion', label: 'Fusion (painel de modelos)' },
-]
-const DEFAULT_UNIFIED_MODEL = UNIFIED_DEFAULT_MODEL
-
-/* ─── API call helpers ─── */
-async function callUnified(messages: { role: string; content: string }[], apiKey: string, model: string, systemPrompt: string = SYSTEM_PROMPT): Promise<string> {
-    const baseUrl = getUnifiedBaseUrl()
-    const candidates = Array.from(new Set([model, DEFAULT_UNIFIED_MODEL]))
-    let lastError: Error | null = null
-
-    for (const modelName of candidates) {
-        try {
-            const res = await fetch(`${baseUrl}/chat/completions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-                body: JSON.stringify({
-                    model: modelName,
-                    messages: [{ role: 'system', content: systemPrompt }, ...messages],
-                    temperature: 0.7,
-                    max_tokens: 2048,
-                }),
-            })
-            if (!res.ok) {
-                const e = await res.json().catch(() => ({}))
-                const msg = e?.error?.message ?? `Unified error ${res.status}`
-                lastError = new Error(msg)
-                if (res.status !== 404 && res.status !== 400) throw lastError
-                continue
-            }
-            const data = await res.json()
-            const content = data.choices?.[0]?.message?.content ?? ''
-            if (!content) throw new Error('Unified retornou resposta vazia')
-            return content
-        } catch (error) {
-            lastError = error instanceof Error ? error : new Error(String(error))
-            if (lastError.name === 'TypeError') {
-                throw new Error(`Não foi possível contactar a API FreeLLM em ${baseUrl}. Confirme que a instância FreeLLMAPI está a correr (Administração → Integrações).`)
-            }
-            if (lastError.message.includes('not found') || lastError.message.includes('unsupported') || lastError.message.includes('model')) continue
-            throw lastError
-        }
-    }
-
-    throw lastError ?? new Error('Unified não respondeu corretamente.')
-}
+Responda sempre em Português (Portugal), de forma clara, direta e prestável.
+Se pedir para executar código ou fazer algo no sistema, explique os passos ou forneça o código completo.`
 
 /* ─── Eye component ─── */
 function Eye({ mouseX, mouseY, eyeRef }: { mouseX: number; mouseY: number; eyeRef: { current: HTMLDivElement | null } }) {
@@ -108,7 +52,7 @@ function Eye({ mouseX, mouseY, eyeRef }: { mouseX: number; mouseY: number; eyeRe
     }, [mouseX, mouseY, eyeRef])
 
     return (
-        <div ref={eyeRef} className="relative flex h-5 w-5 items-center justify-center rounded-full bg-white shadow-inner">
+        <div ref={eyeRef} className="relative flex h-5 w-5 items-center justify-center rounded-full bg-[#ffffff] shadow-inner">
             <div
                 className="h-2.5 w-2.5 rounded-full bg-gray-900 transition-none"
                 style={{ transform: `translate(${pupilPos.x}px, ${pupilPos.y}px)` }}
@@ -178,7 +122,7 @@ function Bubble({ msg }: { msg: Message }) {
                 className={cn(
                     'max-w-[80%] rounded-2xl px-3 py-2 text-xs leading-relaxed',
                     isUser
-                        ? 'rounded-tr-sm bg-brand text-ink'
+                        ? 'rounded-tr-sm bg-brand text-on-brand'
                         : 'rounded-tl-sm border border-white/[0.08] bg-white/[0.05] text-white/85'
                 )}
                 style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
@@ -190,36 +134,7 @@ function Bubble({ msg }: { msg: Message }) {
 }
 
 /* ─── Main Robot Component ─── */
-const VOICE_KEY = 'mkon.bot.voice'
-
-type SpeechResultEvent = { results: { 0: { 0: { transcript: string } } } }
-type SpeechRecognitionLike = {
-    lang: string
-    interimResults: boolean
-    continuous: boolean
-    start: () => void
-    stop: () => void
-    onresult: ((event: SpeechResultEvent) => void) | null
-    onend: (() => void) | null
-    onerror: ((event: unknown) => void) | null
-}
-
-function greetingFor(snapshot: SystemSnapshot | null): string {
-    const intro = 'Sistemas operacionais. MKON Bot ao seu dispor, senhor.'
-    if (!snapshot) return intro
-    return `${intro} Reconheço ${snapshot.modules.length} módulos, ${snapshot.agentsActive} de ${snapshot.agentsTotal} agentes ligados e ${snapshot.companies} empresas registadas. Em que posso ser útil?`
-}
-
-const WELCOME_CAPABILITIES = [
-    '• Analisar dados do negócio',
-    '• Explicar qualquer módulo ou categoria do sistema',
-    '• Criar textos, propostas e mensagens',
-    '• Abrir páginas por comando — ex.: “abre o financeiro”',
-    '• Ajudar com código ou SQL',
-].join('\n')
-
 export function AiRobot() {
-    const nav = useNavigate()
     const [open, setOpen] = useState(false)
     const [minimized, setMinimized] = useState(false)
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
@@ -227,23 +142,9 @@ export function AiRobot() {
     const [input, setInput] = useState('')
     const [thinking, setThinking] = useState(false)
     const [error, setError] = useState('')
-    const [unifiedModel] = useState(DEFAULT_UNIFIED_MODEL)
-    const [voiceOn, setVoiceOn] = useState(() => {
-        try { return localStorage.getItem(VOICE_KEY) !== '0' } catch { return true }
-    })
-    const [listening, setListening] = useState(false)
-    const snapshotRef = useRef<SystemSnapshot | null>(null)
-    const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+    const [model, setModel] = useState<string>('auto')
     const bottomRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
-
-    const anyReady = hasApiKey('unified')
-
-    // Preferência de voz persistida
-    useEffect(() => {
-        setVoiceEnabled(voiceOn)
-        try { localStorage.setItem(VOICE_KEY, voiceOn ? '1' : '0') } catch { /* ignore */ }
-    }, [voiceOn])
 
     // Track mouse globally for eye animation
     useEffect(() => {
@@ -257,116 +158,56 @@ export function AiRobot() {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [messages, thinking])
 
-    // Ativação: saudação J.A.R.V.I.S. + reconhecimento do sistema
+    // Welcome message
     useEffect(() => {
-        if (!open) {
-            stopSpeaking()
-            return
-        }
-        playBotOpen()
-        let active = true
-        void (async () => {
-            const snap = await loadSystemSnapshot()
-            if (!active) return
-            snapshotRef.current = snap
-            const greeting = greetingFor(snap)
-            setMessages((prev) => prev.length > 0 ? prev : [{
+        if (open && messages.length === 0) {
+            const apiStatus = isAiReady()
+                ? `Pronto! Ligado a ${getProviderLabel()}.`
+                : '⚠️ Sem chave de IA configurada. Vá a Administração → Integrações e adicione a chave FreeLLMAPI.'
+            setMessages([{
                 id: 'welcome',
                 role: 'assistant',
-                content: `Olá, senhor. Sou o MKON Bot 🤖\n\n${greeting}\n\nPosso ajudar com:\n${WELCOME_CAPABILITIES}`,
+                content: `Olá! Sou o MKON Bot 🤖\n\n${apiStatus}\n\nComo posso ajudar? Pode pedir-me para:\n• Analisar dados do negócio\n• Criar textos e propostas\n• Explicar como usar o sistema\n• Ajudar com código ou SQL\n• Qualquer tarefa que precise!`,
                 ts: Date.now(),
             }])
-            speak(greeting)
-        })()
-        return () => { active = false }
-    }, [open])
+        }
+    }, [open, messages.length])
 
-    const send = useCallback(async (override?: string) => {
-        const text = (override ?? input).trim()
+    const send = useCallback(async () => {
+        const text = input.trim()
         if (!text || thinking) return
 
-        const apiKey = getApiKey('unified')
-        if (!apiKey) {
-            const msg = 'Chave FreeLLM não configurada. Adicione em Administração → Integrações.'
-            setError(msg)
-            speak(msg)
+        if (!isAiReady()) {
+            setError('Chave de IA não configurada. Adicione a chave FreeLLMAPI em Administração → Integrações.')
             return
         }
 
         const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, ts: Date.now() }
         const updatedMessages = [...messages, userMsg]
         setMessages(updatedMessages)
-        if (override === undefined) setInput('')
+        setInput('')
         setThinking(true)
         setError('')
 
-        const target = detectNavigationCommand(text)
-        if (target) {
-            nav(target.route)
-            const reply = `A abrir ${target.label}, senhor.`
-            setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: reply, ts: Date.now() }])
-            speak(reply)
-            setThinking(false)
-            return
-        }
-
         try {
-            const history = updatedMessages.map((m) => ({ role: m.role, content: m.content }))
-            const systemPrompt = `${SYSTEM_PROMPT}\n\n${formatSystemContext(snapshotRef.current)}`
-            const reply = await callUnified(history, apiKey, unifiedModel, systemPrompt)
-            setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: reply, ts: Date.now() }])
-            speak(reply)
+            const history = updatedMessages
+                .filter((m) => m.id !== 'welcome')
+                .map((m) => ({ role: m.role, content: m.content }))
+            const r = await chatAI([{ role: 'system', content: SYSTEM_PROMPT }, ...history], { model, temperature: 0.7, maxTokens: 2048 })
+            setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: r.text, ts: Date.now() }])
         } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Erro desconhecido.'
-            setError(msg)
-            speak(`Lamento, senhor. ${msg}`)
+            setError(e instanceof Error ? e.message : 'Erro desconhecido.')
         } finally {
             setThinking(false)
         }
-    }, [input, thinking, messages, nav, unifiedModel])
+    }, [input, thinking, messages, model])
 
     const onKey = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
     }
 
-    const toggleMic = () => {
-        if (listening) {
-            recognitionRef.current?.stop()
-            setListening(false)
-            return
-        }
-        const w = window as unknown as {
-            SpeechRecognition?: new () => SpeechRecognitionLike
-            webkitSpeechRecognition?: new () => SpeechRecognitionLike
-        }
-        const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition
-        if (!Ctor) {
-            setError('Este browser não suporta reconhecimento de voz. Use Chrome ou Edge.')
-            return
-        }
-        const recognition = new Ctor()
-        recognition.lang = 'pt-PT'
-        recognition.interimResults = false
-        recognition.continuous = false
-        recognition.onresult = (event) => {
-            const transcript = event.results?.[0]?.[0]?.transcript ?? ''
-            if (transcript.trim()) void send(transcript.trim())
-        }
-        recognition.onend = () => setListening(false)
-        recognition.onerror = () => setListening(false)
-        recognitionRef.current = recognition
-        setError('')
-        setListening(true)
-        try { recognition.start() } catch { setListening(false) }
-    }
-
-    const close = () => {
-        setOpen(false)
-        playBotClose()
-        stopSpeaking()
-        recognitionRef.current?.stop()
-    }
-
+    const anyReady = isAiReady()
+    const isFree = getActiveProvider() === 'freellm'
     const isAiOnline = anyReady
 
     return (
@@ -376,19 +217,19 @@ export function AiRobot() {
                 id="mkon-robot-btn"
                 onClick={() => { setOpen(true); setMinimized(false) }}
                 className={cn(
-                    'fixed bottom-6 right-6 z-40 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-slate-800/95 p-3 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:border-brand/40',
+                    'fixed bottom-6 right-6 z-40 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-graphite/95 p-3 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:border-brand/40',
                     open && !minimized ? 'opacity-0 pointer-events-none scale-75' : 'opacity-100'
                 )}
                 title="Abrir MKON Bot"
             >
                 <RobotFace mouseX={mousePos.x} mouseY={mousePos.y} isThinking={false} isOpen={false} />
                 <span className="text-[10px] font-medium tracking-wide text-brand-soft">MKON Bot</span>
-                {isAiOnline && <div className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-slate-800 bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)] animate-pulse" />}
+                {isAiOnline && <div className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-graphite bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)] animate-pulse" />}
             </button>
 
             {/* Chat panel */}
             <div className={cn(
-                'fixed bottom-6 right-6 z-50 flex flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#0e0f13]/95 shadow-[0_25px_80px_rgba(0,0,0,0.7)] backdrop-blur-xl transition-all duration-300',
+                'fixed bottom-6 right-6 z-50 flex flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-graphite/95 shadow-[0_25px_80px_rgba(0,0,0,0.7)] backdrop-blur-xl transition-all duration-300',
                 open ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none',
                 minimized ? 'h-20 w-72' : 'h-[580px] w-[380px]'
             )}>
@@ -401,33 +242,26 @@ export function AiRobot() {
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold">MKON Bot</p>
                             <p className="text-[10px] text-white/40 truncate">
-                                {thinking ? 'A pensar…' : listening
-                                    ? 'A ouvir…'
-                                    : anyReady
-                                        ? `FreeLLM · ${UNIFIED_MODELS.find(m => m.id === DEFAULT_UNIFIED_MODEL)?.label ?? DEFAULT_UNIFIED_MODEL}${voiceOn ? ' · voz ativa' : ''}`
-                                        : 'Sem API key — configure em Administração'}
+                                {thinking ? 'A pensar…' : anyReady ? getProviderLabel() : 'Sem chave de IA — configure em Administração'}
                             </p>
                         </div>
                     )}
                     {minimized && <span className="flex-1 text-sm font-semibold">MKON Bot</span>}
                     <div className="flex items-center gap-1">
-                        <button
-                            onClick={() => {
-                                setVoiceOn((v) => {
-                                    if (v) stopSpeaking()
-                                    return !v
-                                })
-                            }}
-                            className={cn('rounded-md p-1.5 transition', voiceOn ? 'text-brand-soft hover:bg-white/[0.06]' : 'text-white/30 hover:bg-white/[0.06]')}
-                            title={voiceOn ? 'Desativar voz' : 'Ativar voz'}
-                            aria-label={voiceOn ? 'Desativar voz' : 'Ativar voz'}
-                        >
-                            {voiceOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
-                        </button>
+                        {!minimized && isFree && (
+                            <select
+                                value={model}
+                                onChange={(e) => setModel(e.target.value)}
+                                className="max-w-[120px] rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-white/60 focus:outline-none"
+                                title="Modelo FreeLLMAPI"
+                            >
+                                {FREELLM_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label.replace(' (recomendado)', '')}</option>)}
+                            </select>
+                        )}
                         <button onClick={() => setMinimized((v) => !v)} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title={minimized ? 'Expandir' : 'Minimizar'}>
                             {minimized ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
                         </button>
-                        <button onClick={close} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title="Fechar">
+                        <button onClick={() => setOpen(false)} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title="Fechar">
                             <X className="h-3.5 w-3.5" />
                         </button>
                     </div>
@@ -475,7 +309,7 @@ export function AiRobot() {
                             {!anyReady && (
                                 <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.07] px-3 py-1.5 text-[10px] text-amber-300">
                                     <Zap className="h-3 w-3 shrink-0" />
-                                    Adicione a chave FreeLLM em Administração → Integrações
+                                    Adicione a chave FreeLLMAPI em Administração → Integrações
                                 </div>
                             )}
                             <div className="flex items-end gap-2">
@@ -490,26 +324,15 @@ export function AiRobot() {
                                     className="flex-1 resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-white placeholder-white/25 focus:border-brand/40 focus:outline-none focus:ring-0 disabled:opacity-40"
                                 />
                                 <button
-                                    onClick={toggleMic}
-                                    disabled={thinking || !anyReady}
-                                    className={cn(
-                                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition disabled:opacity-40 disabled:pointer-events-none',
-                                        listening ? 'border-brand/50 bg-brand/15 text-brand-soft animate-pulse' : 'border-white/10 text-white/50 hover:text-white',
-                                    )}
-                                    title={listening ? 'Parar de ouvir' : 'Falar um comando'}
-                                >
-                                    {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                                </button>
-                                <button
-                                    onClick={() => void send()}
+                                    onClick={send}
                                     disabled={!input.trim() || thinking || !anyReady}
-                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-ink transition hover:bg-brand-soft disabled:opacity-40 disabled:pointer-events-none"
+                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-on-brand transition hover:bg-brand-soft disabled:opacity-40 disabled:pointer-events-none"
                                     title="Enviar (Enter)"
                                 >
                                     {thinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                                 </button>
                             </div>
-                            <p className="mt-1.5 text-[10px] text-white/20">Enter para enviar · Shift+Enter para nova linha · {MODULE_KNOWLEDGE.length} módulos reconhecidos</p>
+                            <p className="mt-1.5 text-[10px] text-white/20">Enter para enviar · Shift+Enter para nova linha</p>
                         </div>
                     </>
                 )}

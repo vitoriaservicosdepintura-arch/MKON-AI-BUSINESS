@@ -16,15 +16,31 @@ export function Button({ variant = 'primary', size = 'md', loading, className, c
       className={cn(
         'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none',
         size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-3.5 py-2 text-sm',
-        variant === 'primary' && 'bg-brand text-ink hover:bg-brand-soft shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]',
+        variant === 'primary' && 'bg-brand text-on-brand hover:bg-brand-soft shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]',
         variant === 'ghost' && 'text-white/70 hover:bg-white/[0.06] hover:text-snow',
         variant === 'outline' && 'border border-white/10 text-snow hover:bg-white/[0.05]',
-        variant === 'danger' && 'bg-red-500/90 text-white hover:bg-red-500',
+        variant === 'danger' && 'bg-red-500/90 text-[#ffffff] hover:bg-red-500',
         className,
       )}
     >
       {loading && <Loader2 className="h-4 w-4 animate-spin" />}
       {children}
+    </button>
+  )
+}
+
+/* ---------- Switch ---------- */
+export function SwitchTrack({ checked }: { checked: boolean }) {
+  return (
+    <span aria-hidden className={cn('relative block h-5 w-9 shrink-0 rounded-full transition-colors duration-200', checked ? 'bg-brand' : 'bg-white/20')}>
+      <span className={cn('absolute top-0.5 h-4 w-4 rounded-full shadow transition-all duration-200', checked ? 'left-[18px] bg-on-brand' : 'left-0.5 bg-[#ffffff]')} />
+    </span>
+  )
+}
+export function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50">
+      <SwitchTrack checked={checked} />
     </button>
   )
 }

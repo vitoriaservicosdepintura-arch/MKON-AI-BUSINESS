@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
 import { CheckCircle2, AlertTriangle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -15,9 +15,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setItems((s) => [...s, { id, tone, message }])
     setTimeout(() => setItems((s) => s.filter((t) => t.id !== id)), 4500)
   }, [])
-  const value = useMemo(() => ({ push }), [push])
   return (
-    <Ctx.Provider value={value}>
+    <Ctx.Provider value={{ push }}>
       {children}
       <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite">
         {items.map((t) => {

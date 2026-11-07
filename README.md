@@ -49,10 +49,29 @@ npm run build            # produção (pasta dist/)
 
 ---
 
+## IA: chave unificada FreeLLMAPI
+
+Todos os módulos de IA (MKON Bot, agentes, prospeção) passam por **um só serviço** (`src/lib/ai.ts` → `src/lib/llm.ts`) e usam a chave `freellmapi-…`.
+
+1. Tenha o [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) a correr (por omissão `http://localhost:3001/v1`).
+2. **Administração → Integrações → FreeLLMAPI:** cole a chave, indique o endereço (vazio = `http://localhost:3001/v1`) e clique em **Testar ligação**.
+3. **Agentes de IA → Ativar todos.** Cada agente usa o seu próprio prompt e o modelo `auto` (ou `auto:fast` / `auto:smart`, em *Configurar*). Cada execução fica registada em `ai_tasks` (sucesso ou erro) e `ai_usage`, e respeita o botão de emergência e o limite diário.
+4. Opcional: `supabase/migrations/0004_agents_freellm.sql` põe `freellmapi/auto` como predefinição na base de dados (a aplicação já trata modelos antigos como `auto`).
+
+Groq e Gemini continuam como reserva, só se tiverem chave configurada.
+
+> A chave fica no `localStorage` do browser do proprietário e **nunca** no código nem no Supabase. O FreeLLMAPI é *local-first*: se o MKON estiver publicado em HTTPS e o FreeLLMAPI em `http://localhost`, funciona no mesmo computador; para usar de outros dispositivos, publique o FreeLLMAPI com HTTPS e permita o endereço do MKON (CORS).
+
+## Aparência
+
+- **Cor do tema** (ícone da paleta no cabeçalho): Azul (predefinido), Branco, Preto fosco e Laranja claro fosco. Muda toda a interface e os gráficos.
+- **Menu flutuante** (interruptor no rodapé do menu ou na paleta): o menu sai da posição fixa, fica solto sobre a página, bem transparente e pode ser arrastado pelo topo. Ao desativar, volta ao normal. Só em ecrãs grandes.
+- Ambas as preferências ficam guardadas no browser.
+
 ## Segurança
 
 - **RLS ativo em todas as tabelas**; só `administrators` com `role = 'owner'` acede (`is_owner()`).
-- O frontend só tem a chave **anon**. **Nenhum segredo** (OpenAI, Google Places, WhatsApp, email) fica no navegador: serão usados como *secrets* de Edge Functions (`supabase secrets set ...`).
+- O frontend só tem a chave **anon** do Supabase. As chaves de IA são introduzidas pelo proprietário e ficam apenas no seu browser; OpenAI, Google Places, WhatsApp e email devem ser *secrets* de Edge Functions (`supabase secrets set ...`).
 - Logs de auditoria por *triggers* nas tabelas críticas; os logs não são editáveis.
 - Integridade financeira: despesas/transações **pagas são imutáveis**; total da proposta é calculado pelos itens; propostas não contam como vendas.
 - RGPD: consentimento e oposição por contacto (oposição não pode ser revertida sem novo registo), exportação e eliminação de dados na Administração, `nfc_interactions` sem IP nem identificadores pessoais.
