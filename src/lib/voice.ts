@@ -81,6 +81,46 @@ export function speak(text: string) {
 
 export function stopSpeaking() {
     try { window.speechSynthesis?.cancel() } catch { /* ignore */ }
+    try { currentAudio?.pause() } catch { /* ignore */ }
+    currentAudio = null
+}
+
+/* ── Voz natural no servidor (Edge Function mkon-voice) ── */
+
+let currentAudio: HTMLAudioElement | null = null
+
+/** Saudação conforme a hora do computador. */
+export function greetingForNow(date = new Date()): string {
+    const h = date.getHours()
+    if (h >= 5 && h < 12) return 'Bom dia'
+    if (h >= 12 && h < 19) return 'Boa tarde'
+    return 'Boa noite'
+}
+
+/** Fala com voz natural do servidor; se não estiver disponível, usa a voz do browser. */
+export async function speakNatural(text: string, getToken: () => Promise<string | null>, supabaseUrl: string, anonKey: string) {
+    if (!voiceEnabled) return
+    const clean = cleanForSpeech(text)
+    if (!clean) return
+    try {
+        const token = await getToken()
+        if (!token) throw new Error('sem sessão')
+        const res = await fetch(`${supabaseUrl}/functions/v1/mkon-voice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: anonKey },
+            body: JSON.stringify({ text: clean }),
+        })
+        if (!res.ok) throw new Error(`voz ${res.status}`)
+        const blob = await res.blob()
+        stopSpeaking()
+        const url = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+        currentAudio = audio
+        audio.onended = () => URL.revokeObjectURL(url)
+        await audio.play()
+    } catch {
+        speak(text)
+    }
 }
 
 if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
