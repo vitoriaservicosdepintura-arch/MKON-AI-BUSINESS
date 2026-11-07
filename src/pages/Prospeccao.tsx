@@ -96,6 +96,9 @@ export default function Prospeccao() {
                 ))}
             </div>
 
+            {/* Pesquisa no Google Maps por região */}
+            <GoogleMapsSearch onDone={load} />
+
             {/* Filtros */}
             <div className="mb-4 flex flex-wrap items-center gap-2">
                 <div className="relative flex-1 min-w-[180px]">
@@ -426,5 +429,68 @@ function AddLeadModal({ company, onClose, onCreated }: { company: Company | null
                 <Field label="Valor estimado (€)" hint="Opcional — pode ajustar depois no CRM."><input className="input" type="number" min="0" step="0.01" value={value} onChange={e => setValue(e.target.value)} /></Field>
             </form>
         </Modal>
+    )
+}
+
+/** Pesquisa empresas no Google Maps por região e destaca as que não têm website. */
+function GoogleMapsSearch({ onDone }: { onDone: () => void }) {
+    const toast = useToast()
+    const [query, setQuery] = useState('')
+    const [busy, setBusy] = useState(false)
+    const [result, setResult] = useState<{ encontradas: number; sem_website: number; novas_empresas: number; ja_existiam: number; melhores: { name: string; city: string | null; score: number }[] } | null>(null)
+
+    const run = async () => {
+        const q = query.trim()
+        if (!q || busy) return
+        setBusy(true); setResult(null)
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mkon-prospect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string },
+                body: JSON.stringify({ query: q }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`)
+            setResult(data)
+            toast.push('success', `${data.novas_empresas} novas empresas sem website encontradas.`)
+            onDone()
+        } catch (e) {
+            toast.push('error', e instanceof Error ? e.message : 'Falha na pesquisa.')
+        } finally { setBusy(false) }
+    }
+
+    return (
+        <Card className="mb-4 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[220px]">
+                    <MapPin className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/30" />
+                    <input
+                        className="input pl-9"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') run() }}
+                        placeholder="Ex.: canalizadores em Braga, pintores em Setúbal…"
+                        disabled={busy}
+                    />
+                </div>
+                <Button onClick={run} loading={busy} disabled={!query.trim()}>
+                    <Radar className="h-4 w-4" /> Pesquisar no Google Maps
+                </Button>
+            </div>
+            {result && (
+                <div className="mt-3 text-xs text-white/60">
+                    Encontradas {result.encontradas} · sem website {result.sem_website} · novas {result.novas_empresas} · já existiam {result.ja_existiam}
+                    {result.melhores.length > 0 && (
+                        <ul className="mt-2 space-y-1">
+                            {result.melhores.map((m) => (
+                                <li key={m.name}>★ <span className="text-white/85">{m.name}</span> {m.city ? `· ${m.city}` : ''} · pontuação {m.score}</li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
+        </Card>
     )
 }
