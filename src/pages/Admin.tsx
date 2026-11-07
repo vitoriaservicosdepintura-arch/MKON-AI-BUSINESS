@@ -6,8 +6,8 @@ import { Badge, Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader, 
 import { useToast } from '@/components/ui/Toast'
 import { cn, dateTime } from '@/lib/utils'
 import { isDemoActive, DEMO } from '@/lib/demo'
-import { getApiKey, setApiKey, hasApiKey, API_KEY_META, getLlmBaseUrl, setLlmBaseUrl, DEFAULT_LLM_BASE_URL, type ApiKeyId } from '@/lib/apikeys'
-import { effectiveModel, testFreeLlm } from '@/lib/llm'
+import { getApiKey, setApiKey, hasApiKey, API_KEY_META, detectProviderFromKey, getUniversalUrl, setUniversalUrl, type ApiKeyId } from '@/lib/apikeys'
+import { effectiveModel } from '@/lib/llm'
 import { isAiReady } from '@/lib/ai'
 
 type Tab = 'integracoes' | 'agentes' | 'automacao' | 'logs' | 'dados' | 'definicoes'
@@ -102,43 +102,134 @@ function ApiKeyRow({ id, onSaved }: { id: ApiKeyId; onSaved?: () => void }) {
   )
 }
 
-/* ── FreeLLMAPI: chave unificada + endereço + teste ── */
-function FreeLlmPanel() {
+/* ── Universal API Key: chave única com detecção automática + URL universal ── */
+function UniversalApiKeyPanel() {
   const toast = useToast()
-  const [url, setUrl] = useState(() => (getLlmBaseUrl() === DEFAULT_LLM_BASE_URL ? '' : getLlmBaseUrl()))
+  const [value, setValue] = useState(() => getApiKey('universal'))
+  const [show, setShow] = useState(false)
+  const [saved, setSaved] = useState(() => hasApiKey('universal'))
+  const [url, setUrl] = useState(() => getUniversalUrl())
   const [testing, setTesting] = useState(false)
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null)
+  const [detected, setDetected] = useState(() => value ? detectProviderFromKey(value) : null)
 
-  const saveUrl = () => {
-    setLlmBaseUrl(url)
-    setUrl(getLlmBaseUrl() === DEFAULT_LLM_BASE_URL ? '' : getLlmBaseUrl())
-    toast.push('success', `Endereço guardado: ${getLlmBaseUrl()}`)
+  const save = () => {
+    setApiKey('universal', value)
+    setSaved(hasApiKey('universal'))
+    setUniversalUrl(url)
+    setDetected(value ? detectProviderFromKey(value) : null)
+    setStatus(null)
+    toast.push('success', saved && !value.trim() ? 'Chave removida.' : 'Chave e URL guardadas localmente.')
   }
+
+  const onKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value
+    setValue(newValue)
+    setDetected(newValue ? detectProviderFromKey(newValue) : null)
+  }
+
   const test = async () => {
-    setTesting(true); setStatus(null)
-    const r = await testFreeLlm()
-    setStatus(r); setTesting(false)
+    if (!value.trim()) {
+      toast.push('error', 'Adicione uma chave primeiro.')
+      return
+    }
+    setTesting(true)
+    setStatus(null)
+    
+    try {
+      const detected = detectProviderFromKey(value)
+      let testUrl = url.trim()
+      
+      if (!testUrl) {
+        if (detected.provider === 'groq') testUrl = 'https://api.groq.com/openai/v1'
+        else if (detected.provider === 'openai') testUrl = 'https://api.openai.com/v1'
+        else if (detected.provider === 'gemini') testUrl = 'https://generativelanguage.googleapis.com'
+        else testUrl = 'https://api.openai.com/v1'
+      }
+
+      if (detected.provider === 'groq') {
+        const res = await fetch(`${testUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${value}` },
+          body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'ping' }], max_tokens: 8, temperature: 0 }),
+        })
+        setStatus({ ok: res.ok, message: res.ok ? 'Conexão estabelecida com sucesso!' : `Erro: ${res.status}` })
+      } else if (detected.provider === 'openai' || detected.provider === 'universal') {
+        const res = await fetch(`${testUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${value}` },
+          body: JSON.stringify({ model: 'gpt-3.5-turbo', messages: [{ role: 'user', content: 'ping' }], max_tokens: 8, temperature: 0 }),
+        })
+        setStatus({ ok: res.ok, message: res.ok ? 'Conexão estabelecida com sucesso!' : `Erro: ${res.status}` })
+      } else if (detected.provider === 'gemini') {
+        const res = await fetch(`${testUrl}/v1beta/models/gemini-2.0-flash:generateContent?key=${value}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }], generationConfig: { maxOutputTokens: 8, temperature: 0 } }),
+        })
+        setStatus({ ok: res.ok, message: res.ok ? 'Conexão estabelecida com sucesso!' : `Erro: ${res.status}` })
+      } else {
+        setStatus({ ok: false, message: 'Tipo de chave não suportado para teste automático.' })
+      }
+    } catch (error) {
+      setStatus({ ok: false, message: `Erro ao conectar: ${error instanceof Error ? error.message : 'Desconhecido'}` })
+    }
+    
+    setTesting(false)
   }
 
   return (
     <div className="space-y-3 rounded-xl border border-brand/25 bg-brand/[0.05] p-4">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold">FreeLLMAPI</span>
-        <Badge tone="brand">Principal</Badge>
-        <span className="text-[11px] text-white/40">Uma só chave para o MKON Bot, todos os agentes e a prospeção.</span>
+        <span className="text-sm font-semibold">Chave Universal de IA</span>
+        <Badge tone="brand">Universal</Badge>
+        <span className="text-[11px] text-white/40">Cole qualquer chave API - o sistema detecta automaticamente o provedor.</span>
       </div>
-      <ApiKeyRow id="freellm" onSaved={() => setStatus(null)} />
+      
       <div className="flex items-end gap-2">
         <div className="flex-1">
-          <label className="label">Endereço do FreeLLMAPI</label>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={DEFAULT_LLM_BASE_URL} className="input font-mono text-xs" autoComplete="off" />
+          <label className="label flex items-center gap-1.5">
+            Chave API
+            {saved && <CheckCircle2 className="h-3 w-3 text-emerald-400" />}
+            {detected && <span className="text-[10px] text-white/50">{detected.label}</span>}
+          </label>
+          <div className="relative">
+            <input
+              type={show ? 'text' : 'password'}
+              value={value}
+              onChange={onKeyChange}
+              placeholder="Cole qualquer chave API (OpenAI, Groq, Gemini, etc.)"
+              className="input pr-9 font-mono text-xs"
+              autoComplete="off"
+            />
+            <button type="button" onClick={() => setShow((v) => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70">
+              {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </button>
+          </div>
         </div>
-        <Button size="sm" variant="outline" onClick={saveUrl} className="mb-px shrink-0">Guardar</Button>
+        <Button size="sm" variant={saved ? 'outline' : 'primary'} onClick={save} className="mb-px shrink-0">
+          {saved ? 'Atualizar' : 'Guardar'}
+        </Button>
+      </div>
+
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <label className="label">URL da API (opcional)</label>
+          <input 
+            value={url} 
+            onChange={(e) => setUrl(e.target.value)} 
+            placeholder="https://api.openai.com/v1 (ou deixe vazio para usar URL padrão)" 
+            className="input font-mono text-xs" 
+            autoComplete="off" 
+          />
+        </div>
         <Button size="sm" onClick={test} loading={testing} className="mb-px shrink-0">Testar ligação</Button>
       </div>
+
       <p className="text-[11px] leading-relaxed text-white/40">
-        O FreeLLMAPI corre na sua máquina ou num servidor seu (por omissão <code className="font-mono">{DEFAULT_LLM_BASE_URL}</code>). Deixe o endereço vazio se estiver no mesmo computador.
+        O sistema detecta automaticamente o provedor (OpenAI, Groq, Gemini, Anthropic, etc.) pelo formato da chave. Você pode configurar uma URL customizada para usar proxies ou endpoints alternativos.
       </p>
+      
       {status && (
         <p className={cn('rounded-lg border px-3 py-2 text-xs', status.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-red-500/30 bg-red-500/10 text-red-300')}>
           {status.ok ? '✓ ' : '✕ '}{status.message}
@@ -186,7 +277,7 @@ function Integrations() {
 
   // Determine which API key IDs map to supabase providers
   const providerKeyMap: Record<string, ApiKeyId | undefined> = {
-    openai: 'openai', google_places: 'google_places', google_business: undefined,
+    openai: 'universal', google_places: 'google_places', google_business: undefined,
     whatsapp: 'whatsapp', email: undefined, n8n: 'n8n', hosting: undefined,
   }
 
@@ -196,29 +287,14 @@ function Integrations() {
       <Card className="mb-6">
         <CardHeader
           title="Chaves de IA"
-          subtitle="FreeLLMAPI é o principal; Groq e Gemini ficam como reserva. Guardadas apenas no seu browser."
+          subtitle="Chave universal com detecção automática de provedor. Guardadas apenas no seu browser."
         />
         <div className="space-y-4 p-5">
           <div className="flex items-start gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 text-xs text-white/45">
             <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-soft" />
             As chaves são armazenadas em <code className="font-mono">localStorage</code> do seu browser. Nunca saem do seu dispositivo.
           </div>
-          <FreeLlmPanel />
-          <p className="pt-1 text-[11px] font-medium uppercase tracking-wider text-white/30">Reserva (opcional)</p>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <ApiKeyRow id="groq" />
-              <a href={API_KEY_META.groq.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-brand-soft/70 hover:text-brand-soft">
-                Obter chave Groq <ExternalLink className="h-2.5 w-2.5" />
-              </a>
-            </div>
-            <div>
-              <ApiKeyRow id="gemini" />
-              <a href={API_KEY_META.gemini.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-brand-soft/70 hover:text-brand-soft">
-                Obter chave Gemini <ExternalLink className="h-2.5 w-2.5" />
-              </a>
-            </div>
-          </div>
+          <UniversalApiKeyPanel />
         </div>
       </Card>
 
@@ -325,7 +401,7 @@ function Agents() {
     <>
       {!aiReady && !openAiReady && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs text-amber-100/90">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" /> Sem chave de IA. Adicione a chave <strong>FreeLLMAPI</strong> em Integrações: sem ela os agentes <strong>não executam tarefas</strong>.
+          <Info className="mt-0.5 h-4 w-4 shrink-0" /> Sem chave de IA. Adicione a chave <strong>Universal</strong> em Integrações: sem ela os agentes <strong>não executam tarefas</strong>.
         </div>
       )}
       <div className="grid gap-3 md:grid-cols-2">

@@ -41,7 +41,7 @@ Páginas ainda não implementadas mostram claramente "Módulo previsto para a Et
 
 ### 2. Aplicação
 ```bash
-cp .env.example .env     # preencha VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY
+cp .env.example .env     # preencha VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY e VITE_FREELLM_API_KEY (opcional)
 npm install
 npm run dev              # http://localhost:5173
 npm run build            # produção (pasta dist/)
@@ -53,6 +53,16 @@ npm run build            # produção (pasta dist/)
 
 Todos os módulos de IA (MKON Bot, agentes, prospeção) passam por **um só serviço** (`src/lib/ai.ts` → `src/lib/llm.ts`) e usam a chave `freellmapi-…`.
 
+### Configuração (opcional - pode ser via env ou painel)
+
+**Opção 1 - Variável de ambiente (recomendado para desenvolvimento):**
+Adicione ao `.env`:
+```bash
+VITE_FREELLM_API_KEY=freellmapi-405ef1d91f71c7fa437627b2f0baf43281dd57a070fe0bec
+```
+A chave será carregada automaticamente no primeiro acesso.
+
+**Opção 2 - Painel de Administração:**
 1. Tenha o [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) a correr (por omissão `http://localhost:3001/v1`).
 2. **Administração → Integrações → FreeLLMAPI:** cole a chave, indique o endereço (vazio = `http://localhost:3001/v1`) e clique em **Testar ligação**.
 3. **Agentes de IA → Ativar todos.** Cada agente usa o seu próprio prompt e o modelo `auto` (ou `auto:fast` / `auto:smart`, em *Configurar*). Cada execução fica registada em `ai_tasks` (sucesso ou erro) e `ai_usage`, e respeita o botão de emergência e o limite diário.

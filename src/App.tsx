@@ -17,6 +17,18 @@ import NfcPage from '@/pages/Nfc'
 import Projetos from '@/pages/Projetos'
 import Financeiro from '@/pages/Financeiro'
 import Relatorios from '@/pages/Relatorios'
+import LojaGifsLayout from '@/pages/loja-gifs/Layout'
+import LojaGifsDashboard from '@/pages/loja-gifs/Dashboard'
+import LojaGifsCategorias from '@/pages/loja-gifs/Categorias'
+import LojaGifsProdutos from '@/pages/loja-gifs/Produtos'
+import LojaGifsPersonalizacoes from '@/pages/loja-gifs/Personalizacoes'
+import LojaGifsPedidos from '@/pages/loja-gifs/Pedidos'
+import LojaGifsClientes from '@/pages/loja-gifs/Clientes'
+import LojaGifsPromocoes from '@/pages/loja-gifs/Promocoes'
+import LojaGifsEstoque from '@/pages/loja-gifs/Estoque'
+import LojaGifsFinanceiro from '@/pages/loja-gifs/Financeiro'
+import LojaGifsRelatorios from '@/pages/loja-gifs/Relatorios'
+import LojaGifsConfiguracoes from '@/pages/loja-gifs/Configuracoes'
 import { activateApiKeyFromUrl } from '@/lib/apikeys'
 import { UiPrefsProvider } from '@/lib/ui-prefs'
 
@@ -32,7 +44,15 @@ function UrlKeyActivator() {
       if (!active) return
 
       if (candidate) {
-        toast.push('success', `${candidate.provider === 'groq' ? 'Groq' : 'Gemini'} ativada e pronta para uso em todos os módulos.`)
+        const providerLabels: Record<string, string> = {
+          groq: 'Groq',
+          gemini: 'Gemini',
+          openai: 'OpenAI',
+          anthropic: 'Anthropic',
+          universal: 'Chave Universal'
+        }
+        const label = providerLabels[candidate.provider] || 'Chave de IA'
+        toast.push('success', `${label} ativada e pronta para uso em todos os módulos.`)
       }
 
       setReady(true)
@@ -92,6 +112,19 @@ export default function App() {
               <Route path="projetos" element={<Projetos />} />
               <Route path="financeiro" element={<Financeiro />} />
               <Route path="relatorios" element={<Relatorios />} />
+              <Route path="loja-gifs" element={<LojaGifsLayout />}>
+                <Route index element={<LojaGifsDashboard />} />
+                <Route path="categorias" element={<LojaGifsCategorias />} />
+                <Route path="produtos" element={<LojaGifsProdutos />} />
+                <Route path="personalizacoes" element={<LojaGifsPersonalizacoes />} />
+                <Route path="pedidos" element={<LojaGifsPedidos />} />
+                <Route path="clientes" element={<LojaGifsClientes />} />
+                <Route path="promocoes" element={<LojaGifsPromocoes />} />
+                <Route path="estoque" element={<LojaGifsEstoque />} />
+                <Route path="financeiro" element={<LojaGifsFinanceiro />} />
+                <Route path="relatorios" element={<LojaGifsRelatorios />} />
+                <Route path="configuracoes" element={<LojaGifsConfiguracoes />} />
+              </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

@@ -137,6 +137,9 @@ function Bubble({ msg }: { msg: Message }) {
 export function AiRobot() {
     const [open, setOpen] = useState(false)
     const [minimized, setMinimized] = useState(false)
+    const [visible, setVisible] = useState(() => {
+        try { return localStorage.getItem('mkon.robot.visible') !== '0' } catch { return true }
+    })
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
     const [messages, setMessages] = useState<Message[]>([])
     const [input, setInput] = useState('')
@@ -145,6 +148,11 @@ export function AiRobot() {
     const [model, setModel] = useState<string>('auto')
     const bottomRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
+
+    // Persistir visibilidade
+    useEffect(() => {
+        try { localStorage.setItem('mkon.robot.visible', visible ? '1' : '0') } catch { /* ignore */ }
+    }, [visible])
 
     // Track mouse globally for eye animation
     useEffect(() => {
@@ -213,18 +221,34 @@ export function AiRobot() {
     return (
         <>
             {/* Floating trigger button */}
+            {visible && (
+                <button
+                    id="mkon-robot-btn"
+                    onClick={() => { setOpen(true); setMinimized(false) }}
+                    className={cn(
+                        'fixed bottom-6 right-6 z-40 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-graphite/95 p-3 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:border-brand/40',
+                        open && !minimized ? 'opacity-0 pointer-events-none scale-75' : 'opacity-100'
+                    )}
+                    title="Abrir MKON Bot"
+                >
+                    <RobotFace mouseX={mousePos.x} mouseY={mousePos.y} isThinking={false} isOpen={false} />
+                    <span className="text-[10px] font-medium tracking-wide text-brand-soft">MKON Bot</span>
+                    {isAiOnline && <div className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-graphite bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)] animate-pulse" />}
+                </button>
+            )}
+
+            {/* Toggle visibility button - próximo ao robô */}
             <button
-                id="mkon-robot-btn"
-                onClick={() => { setOpen(true); setMinimized(false) }}
+                onClick={() => setVisible(!visible)}
                 className={cn(
-                    'fixed bottom-6 right-6 z-40 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-graphite/95 p-3 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:border-brand/40',
-                    open && !minimized ? 'opacity-0 pointer-events-none scale-75' : 'opacity-100'
+                    'fixed bottom-6 z-40 flex h-10 w-10 items-center justify-center rounded-full border-2 shadow-xl backdrop-blur-md transition-all duration-300 hover:scale-105',
+                    visible 
+                        ? 'right-16 border-cyan-400/50 bg-cyan-400/20 text-cyan-300 hover:border-cyan-400/70 hover:bg-cyan-400/30' 
+                        : 'right-6 border-cyan-400/50 bg-cyan-400/20 text-cyan-300 hover:border-cyan-400/70 hover:bg-cyan-400/30'
                 )}
-                title="Abrir MKON Bot"
+                title={visible ? 'Esconder MKON Bot' : 'Mostrar MKON Bot'}
             >
-                <RobotFace mouseX={mousePos.x} mouseY={mousePos.y} isThinking={false} isOpen={false} />
-                <span className="text-[10px] font-medium tracking-wide text-brand-soft">MKON Bot</span>
-                {isAiOnline && <div className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-graphite bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)] animate-pulse" />}
+                {visible ? <X className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
             </button>
 
             {/* Chat panel */}
