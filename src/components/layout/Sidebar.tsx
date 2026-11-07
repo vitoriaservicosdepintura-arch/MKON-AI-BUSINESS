@@ -4,6 +4,7 @@ import { GripVertical, PanelLeftClose, PanelLeftOpen, PictureInPicture2, X } fro
 import { NAV } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 import { useUiPrefs } from '@/lib/ui-prefs'
+import { playNavigate } from '@/lib/sfx'
 import { SwitchTrack } from '@/components/ui'
 
 type Props = {
@@ -130,7 +131,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onCloseMobile, badges
                 key={to}
                 to={to}
                 end={to === '/'}
-                onClick={onCloseMobile}
+                onClick={() => { playNavigate(); onCloseMobile?.() }}
                 className={({ isActive }) =>
                   cn(
                     'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors',

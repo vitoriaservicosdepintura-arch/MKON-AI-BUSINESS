@@ -2,6 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase, isConfigured } from '@/lib/supabase'
+import { playBotOpen, playBotClose, playClick } from '@/lib/sfx'
+import { greetingForNow, speakNatural, stopSpeaking } from '@/lib/voice'
+
+const greetAndAsk = () => {
+    const url = import.meta.env.VITE_SUPABASE_URL as string
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+    const getToken = async () => (await supabase.auth.getSession()).data.session?.access_token ?? null
+    speakNatural(`${greetingForNow()}, senhor. O que deseja que eu faça?`, getToken, url, anonKey)
+}
 
 /** Agente no servidor (Edge Function mkon-agent): usa a sessão de login do proprietário. */
 async function callAgent(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; tools_used: string[] }> {
@@ -177,6 +186,7 @@ export function AiRobot() {
     const send = useCallback(async () => {
         const text = input.trim()
         if (!text || thinking) return
+        playClick()
 
         if (!isConfigured) {
             setError('Supabase não configurado neste site.')
@@ -216,7 +226,7 @@ export function AiRobot() {
             {visible && (
                 <button
                     id="mkon-robot-btn"
-                    onClick={() => { setOpen(true); setMinimized(false) }}
+                    onClick={() => { setOpen(true); setMinimized(false); playBotOpen(); greetAndAsk() }}
                     className={cn(
                         'fixed bottom-6 right-6 z-40 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-graphite/95 p-3 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:border-brand/40',
                         open && !minimized ? 'opacity-0 pointer-events-none scale-75' : 'opacity-100'
@@ -267,7 +277,7 @@ export function AiRobot() {
                         <button onClick={() => setMinimized((v) => !v)} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title={minimized ? 'Expandir' : 'Minimizar'}>
                             {minimized ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
                         </button>
-                        <button onClick={() => setOpen(false)} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title="Fechar">
+                        <button onClick={() => { setOpen(false); playBotClose(); stopSpeaking() }} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title="Fechar">
                             <X className="h-3.5 w-3.5" />
                         </button>
                     </div>
