@@ -1,8 +1,9 @@
 // MKON Voice — síntese de voz no servidor (Supabase Edge Function).
 //
 // Só o proprietário autenticado pode usar. Devolve áudio MP3.
-// Configuração (segredos do Supabase):
-//   ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID  → voz natural (recomendado, pt-BR feminina)
+// Configuração (segredos do Supabase), por ordem de prioridade:
+//   MULTIVOZES_URL + MULTIVOZES_API_KEY (+ MULTIVOZES_VOICE, por omissão Thalita) → motor MultiVozes self-hosted
+//   ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID  → voz natural (pt-BR feminina)
 //   ou, em alternativa: OPENAI_API_KEY (+ opcional OPENAI_TTS_VOICE, por omissão "nova")
 //
 // Deploy: supabase functions deploy mkon-voice
@@ -35,13 +36,23 @@ Deno.serve(async (req) => {
     const text = String(body.text ?? '').trim().slice(0, MAX_CHARS)
     if (!text) return json({ error: 'Texto vazio.' }, 400)
 
+    const mvUrl = (Deno.env.get('MULTIVOZES_URL') ?? '').replace(/\/+$/, '')
+    const mvKey = Deno.env.get('MULTIVOZES_API_KEY')
+    const mvVoice = Deno.env.get('MULTIVOZES_VOICE') ?? 'pt-BR-ThalitaMultilingualNeural'
     const elKey = Deno.env.get('ELEVENLABS_API_KEY')
     const elVoice = Deno.env.get('ELEVENLABS_VOICE_ID')
     const oaKey = Deno.env.get('OPENAI_API_KEY')
 
     let res: Response
     try {
-        if (elKey && elVoice) {
+        if (mvUrl && mvKey) {
+            // Motor MultiVozes (self-hosted), voz brasileira feminina Thalita.
+            res = await fetch(`${mvUrl}/v1/audio/speech`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${mvKey}` },
+                body: JSON.stringify({ model: 'tts-1', input: text, voice: mvVoice, response_format: 'mp3', speed: 1.0 }),
+            })
+        } else if (elKey && elVoice) {
             res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${elVoice}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'xi-api-key': elKey, Accept: 'audio/mpeg' },
