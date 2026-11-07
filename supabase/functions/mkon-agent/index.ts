@@ -57,6 +57,73 @@ const TOOLS = [
     {
         type: 'function',
         function: {
+            name: 'create_proposal',
+            description: 'Cria uma proposta comercial em RASCUNHO para uma empresa, com itens. Não envia nada ao cliente. Use para propostas de websites, NFC, SEO, etc.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    company_id: { type: 'string', description: 'UUID da empresa (obtenha com query_table em companies)' },
+                    lead_id: { type: 'string', description: 'UUID do lead (opcional)' },
+                    title: { type: 'string' },
+                    items: {
+                        type: 'array',
+                        minItems: 1,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                description: { type: 'string' },
+                                quantity: { type: 'number', minimum: 0.01 },
+                                unit_price: { type: 'number', minimum: 0 },
+                            },
+                            required: ['description', 'unit_price'],
+                            additionalProperties: false,
+                        },
+                    },
+                    delivery_days: { type: 'integer', minimum: 1 },
+                    notes: { type: 'string' },
+                },
+                required: ['company_id', 'title', 'items'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'draft_message',
+            description: 'Prepara uma mensagem de contacto para uma empresa, ficando AGUARDA_APROVACAO. Nunca é enviada automaticamente; o proprietário aprova.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    company_id: { type: 'string' },
+                    channel: { type: 'string', enum: ['email', 'whatsapp', 'formulario', 'telefone', 'outro'] },
+                    body: { type: 'string', description: 'Texto completo da mensagem em Português de Portugal' },
+                },
+                required: ['company_id', 'channel', 'body'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'update_lead_next_action',
+            description: 'Define o próximo passo de um lead e a data em que deve ser feito.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    lead_id: { type: 'string' },
+                    next_action: { type: 'string' },
+                    next_action_at: { type: 'string', description: 'Data/hora ISO 8601 (opcional)' },
+                },
+                required: ['lead_id', 'next_action'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'create_ai_task',
             description: 'Cria uma tarefa para um agente de IA existente (fica pendente). Usar quando o proprietário pedir para criar/agendar trabalho.',
             parameters: {
@@ -116,6 +183,64 @@ async function runTool(name: string, args: Record<string, unknown>, sb: Supabase
         return { rows: data, count: data?.length ?? 0 }
     }
 
+    if (name === 'create_proposal') {
+        const items = Array.isArray(args.items) ? args.items as any[] : []
+        if (items.length === 0) return { error: 'A proposta precisa de pelo menos um item.' }
+        const number = 'PR-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 6).toUpperCase()
+        const { data: prop, error } = await sb.from('proposals').insert({
+            number,
+            company_id: String(args.company_id ?? ''),
+            lead_id: args.lead_id ?? null,
+            title: String(args.title ?? '').slice(0, 200),
+            status: 'rascunho',
+            delivery_days: args.delivery_days ?? null,
+            notes: args.notes ?? null,
+        }).select('id,number,title,status,total').single()
+        if (error) return { error: error.message }
+        const rows = items.map((it, i) => ({
+            proposal_id: prop.id,
+            description: String(it.description ?? '').slice(0, 300),
+            quantity: Number(it.quantity) || 1,
+            unit_price: Number(it.unit_price) || 0,
+            position: i,
+        }))
+        const { error: itemsErr } = await sb.from('proposal_items').insert(rows)
+        if (itemsErr) return { error: itemsErr.message, proposal: prop }
+        const { data: fresh } = await sb.from('proposals').select('id,number,title,status,total').eq('id', prop.id).single()
+        return { created: fresh ?? prop, note: 'Rascunho criado. Não foi enviado ao cliente.' }
+    }
+
+    if (name === 'draft_message') {
+        const channel = String(args.channel ?? 'email')
+        const companyId = String(args.company_id ?? '')
+        // Reutiliza a conversa existente desse canal ou cria uma nova
+        let { data: conv } = await sb.from('conversations').select('id').eq('company_id', companyId).eq('channel', channel).limit(1).maybeSingle()
+        if (!conv) {
+            const { data: created, error: convErr } = await sb.from('conversations').insert({ company_id: companyId, channel, subject: 'Prospeção' }).select('id').single()
+            if (convErr) return { error: convErr.message }
+            conv = created
+        }
+        const { data: agent } = await sb.from('ai_agents').select('id').eq('code', 'vendedor').maybeSingle()
+        const { data: msg, error } = await sb.from('messages').insert({
+            conversation_id: conv!.id,
+            direction: 'saida',
+            status: 'aguarda_aprovacao',
+            body: String(args.body ?? ''),
+            prepared_by_agent: agent?.id ?? null,
+        }).select('id,status').single()
+        if (error) return { error: error.message }
+        return { draft: msg, note: 'Mensagem preparada e à espera de aprovação. Não foi enviada.' }
+    }
+
+    if (name === 'update_lead_next_action') {
+        const { data, error } = await sb.from('leads').update({
+            next_action: String(args.next_action ?? '').slice(0, 300),
+            next_action_at: args.next_action_at ?? null,
+        }).eq('id', String(args.lead_id ?? '')).select('id,next_action,next_action_at').single()
+        if (error) return { error: error.message }
+        return { updated: data }
+    }
+
     if (name === 'create_ai_task') {
         const { data: agent, error: agentErr } = await sb.from('ai_agents').select('id,code').eq('code', String(args.agent_code ?? '')).maybeSingle()
         if (agentErr) return { error: agentErr.message }
@@ -156,12 +281,27 @@ Deno.serve(async (req) => {
     const llmModel = Deno.env.get('LLM_MODEL') ?? 'auto'
     if (!llmBase || !llmKey) return json({ error: 'LLM_BASE_URL ou LLM_API_KEY não configurados nos segredos do Supabase.' }, 500)
 
-    let body: { messages?: { role: 'user' | 'assistant'; content: string }[] }
+    let body: { messages?: { role: 'user' | 'assistant'; content: string }[]; agent_code?: string }
     try { body = await req.json() } catch { return json({ error: 'Pedido inválido.' }, 400) }
     const history = (body.messages ?? []).filter((m) => m && typeof m.content === 'string').slice(-30)
     if (history.length === 0) return json({ error: 'Mensagem vazia.' }, 400)
 
-    const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history]
+    // Agente escolhido na página Agentes: usa o seu nome, descrição e regras.
+    let systemPrompt = SYSTEM_PROMPT
+    const agentCode = (body as any).agent_code as string | undefined
+    if (agentCode) {
+        const { data: agent } = await sb.from('ai_agents').select('name,description,system_prompt').eq('code', agentCode).maybeSingle()
+        if (agent) {
+            systemPrompt = [
+                `Você é o agente "${agent.name}" no sistema MKON AI Business (agência de serviços digitais em Portugal).`,
+                agent.description,
+                agent.system_prompt ? `Regras: ${agent.system_prompt}` : '',
+                SYSTEM_PROMPT,
+            ].filter(Boolean).join('\n')
+        }
+    }
+
+    const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
     const toolsUsed: string[] = []
 
     for (let step = 0; step < 6; step++) {
