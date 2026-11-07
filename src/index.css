@@ -78,3 +78,66 @@ body {
     animation: shimmer 1.4s infinite;
   }
 }
+
+/* ─── Efeitos visuais (transições, cliques, menus) ─── */
+@layer components {
+
+@keyframes mkon-ripple {
+  from { transform: scale(0); opacity: 0.45; }
+  to   { transform: scale(1); opacity: 0; }
+}
+@keyframes mkon-page-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.995); filter: blur(4px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+
+.mkon-ripple {
+  position: absolute;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.08) 45%, transparent 70%);
+  pointer-events: none;
+  transform: scale(0);
+  animation: mkon-ripple 0.6s ease-out forwards;
+}
+
+/* Página: entrada suave ao mudar de módulo */
+.mkon-page {
+  animation: mkon-page-in 0.42s cubic-bezier(.2,.7,.2,1) both;
+}
+
+/* Botões: pressão ao clicar e transição de cor/sombra */
+button, [role="button"], a[href] {
+  transition: transform 0.15s ease, background-color 0.2s ease, box-shadow 0.25s ease, border-color 0.25s ease, color 0.2s ease, opacity 0.2s ease;
+}
+button:not(:disabled):active, [role="button"]:active {
+  transform: scale(0.97);
+}
+
+/* Menu lateral: deslize e brilho ao passar o rato */
+aside a[href] {
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease, box-shadow 0.3s ease;
+}
+aside a[href]:hover {
+  transform: translateX(3px);
+  box-shadow: inset 2px 0 0 0 rgba(255,255,255,0.25);
+}
+aside a[href]:active {
+  transform: translateX(3px) scale(0.98);
+}
+
+/* Cartões: leve elevação e brilho ao passar o rato */
+.card {
+  transition: transform 0.25s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.card:hover {
+  border-color: rgba(255,255,255,0.14);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 14px 32px -14px rgba(0,0,0,0.75);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mkon-page, .mkon-ripple, .card, button, a[href], aside a[href] {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+}

@@ -39,7 +39,7 @@ export function AppShell() {
             <OctagonAlert className="h-4 w-4" /> Botão de emergência ativo: todas as atividades automáticas e envios estão parados.
           </div>
         )}
-        <main key={location.pathname} className="mx-auto w-full max-w-[1400px] flex-1 animate-fade-up px-4 py-6 md:px-6">
+        <main key={location.pathname} className="mx-auto w-full max-w-[1400px] flex-1 mkon-page px-4 py-6 md:px-6">
           <Outlet />
         </main>
       </div>
