@@ -5,8 +5,24 @@ import { Badge, Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader, 
 import { useToast } from '@/components/ui/Toast'
 import { cn, relativeTime } from '@/lib/utils'
 import { isDemoActive, DEMO } from '@/lib/demo'
-import { chatAI, isAiReady, getProviderLabel } from '@/lib/ai'
-import { FREELLM_MODELS, effectiveModel, isFreeLlmModel } from '@/lib/llm'
+import { isConfigured } from '@/lib/supabase'
+import { FREELLM_MODELS, isFreeLlmModel } from '@/lib/llm'
+
+/** Executa a tarefa no servidor (Edge Function mkon-agent) com o agente escolhido. */
+async function runAgentOnServer(agentCode: string, task: string): Promise<{ reply: string; tools_used: string[] }> {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
+    const url = import.meta.env.VITE_SUPABASE_URL as string
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+    const res = await fetch(`${url}/functions/v1/mkon-agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: anonKey },
+        body: JSON.stringify({ agent_code: agentCode, messages: [{ role: 'user', content: task }] }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data?.error ?? `O agente devolveu erro ${res.status}.`)
+    return data
+}
 
 type Agent = {
     id: string; code: string; name: string; description: string; status: string
@@ -14,9 +30,9 @@ type Agent = {
     last_error: string | null; sort_order: number; system_prompt?: string | null
 }
 
-/** Com FreeLLMAPI, modelos antigos (ex.: gpt-4o-mini) passam a 'auto'. */
+/** Modelo mostrado no cartão do agente (o servidor escolhe o fornecedor). */
 function modelForAgent(agent: Pick<Agent, 'model'>): string {
-    return effectiveModel(agent.model)
+    return agent.model || 'auto'
 }
 type Task = {
     id: string; title: string; status: string; error_message: string | null
@@ -100,11 +116,11 @@ export default function Agentes() {
             />
 
             {/* Info banner */}
-            <div className={cn('mb-5 flex items-start gap-3 rounded-xl border px-4 py-3', isAiReady() ? 'border-green-500/20 bg-green-500/[0.05]' : 'border-white/[0.08] bg-white/[0.02]')}>
+            <div className={cn('mb-5 flex items-start gap-3 rounded-xl border px-4 py-3', isConfigured ? 'border-green-500/20 bg-green-500/[0.05]' : 'border-white/[0.08] bg-white/[0.02]')}>
                 <Cpu className="mt-0.5 h-4 w-4 shrink-0 text-brand-soft" />
                 <p className="text-xs text-white/60">
-                    {isAiReady()
-                        ? <><strong className="text-green-400">✓ IA pronta</strong> — {getProviderLabel()} ligado: todos os agentes usam esta ligação. Ative um agente e clique em “Executar tarefa”.</>
+                    {isConfigured
+                        ? <><strong className="text-green-400">✓ IA pronta</strong> — agente MKON no servidor ligado. Ative um agente e clique em “Executar tarefa”.</>
                         : <>Os agentes requerem a chave <strong className="text-white/80">FreeLLMAPI</strong> configurada em <strong className="text-white/80">Administração → Integrações</strong>.</>
                     }
                 </p>
@@ -147,7 +163,7 @@ export default function Agentes() {
                                         <Button variant="ghost" size="sm" onClick={() => setExpandedAgent(expanded ? null : agent.id)}>
                                             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                         </Button>
-                                        {isAiReady() && <RunTaskButton agent={agent} onDone={load} disabled={!demo && agent.status !== 'ativo'} />}
+                                        {isConfigured && <RunTaskButton agent={agent} onDone={load} disabled={!demo && agent.status !== 'ativo'} />}
                                         <Button size="sm" variant={agent.status === 'ativo' ? 'outline' : 'primary'} onClick={() => toggleStatus(agent)}>
                                             {agent.status === 'ativo' ? <><Pause className="h-3.5 w-3.5" /> Pausar</> : <><Play className="h-3.5 w-3.5" /> Ativar</>}
                                         </Button>
@@ -242,27 +258,21 @@ function RunTaskButton({ agent, onDone, disabled }: { agent: Agent; onDone: () =
 
         const startedAt = new Date().toISOString()
         try {
-            const system = [
-                `Você é o agente "${agent.name}" no sistema MKON AI Business, uma agência de serviços digitais em Portugal.`,
-                agent.description,
-                agent.system_prompt ? `Regras: ${agent.system_prompt}` : '',
-                'Responda em Português de Portugal. Seja concreto e útil.',
-            ].filter(Boolean).join('\n')
-            const r = await chatAI([{ role: 'system', content: system }, { role: 'user', content: task }], { model: modelForAgent(agent) })
-            setResult(r.text)
-            setVia(r.routedVia ?? `${r.provider}/${r.model}`)
+            const r = await runAgentOnServer(agent.code, task)
+            setResult(r.reply)
+            setVia(r.tools_used?.length ? `ferramentas: ${r.tools_used.join(', ')}` : 'agente MKON')
 
             if (!demo) {
                 const { data: row, error } = await supabase.from('ai_tasks').insert({
                     agent_id: agent.id, title: task.slice(0, 100), status: 'concluida',
-                    input: { prompt: task }, output: { reply: r.text, via: r.routedVia },
+                    input: { prompt: task }, output: { reply: r.reply, tools_used: r.tools_used },
                     started_at: startedAt, finished_at: new Date().toISOString(),
                 }).select('id').single()
                 if (error) toast.push('info', `Resposta obtida, mas o registo da tarefa falhou: ${error.message}`)
                 await supabase.from('ai_usage').insert({
                     agent_id: agent.id, task_id: row?.id ?? null,
-                    provider: r.provider === 'freellm' ? 'freellmapi' : r.provider,
-                    model: r.routedVia ?? r.model, input_tokens: r.inputTokens, output_tokens: r.outputTokens, cost_eur: 0,
+                    provider: 'mkon-agent',
+                    model: 'mkon-agent', input_tokens: 0, output_tokens: 0, cost_eur: 0,
                 })
                 if (agent.last_error) await supabase.from('ai_agents').update({ last_error: null }).eq('id', agent.id)
                 onDone()
