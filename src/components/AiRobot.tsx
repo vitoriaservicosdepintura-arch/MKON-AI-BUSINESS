@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { chatAI, getActiveProvider, getProviderLabel, isAiReady } from '@/lib/ai'
-import { FREELLM_MODELS } from '@/lib/llm'
+import { supabase, isConfigured } from '@/lib/supabase'
+
+/** Agente no servidor (Edge Function mkon-agent): usa a sessão de login do proprietário. */
+async function callAgent(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; tools_used: string[] }> {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
+    const url = import.meta.env.VITE_SUPABASE_URL as string
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+    const res = await fetch(`${url}/functions/v1/mkon-agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: anonKey },
+        body: JSON.stringify({ messages }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data?.error ?? `O agente devolveu erro ${res.status}.`)
+    return data
+}
 
 /* ─── Types ─── */
 interface Message {
@@ -13,27 +28,6 @@ interface Message {
 }
 
 /* ─── System context ─── */
-const SYSTEM_PROMPT = `Você é o MKON Bot — assistente de IA privado do sistema MKON AI Business.
-Você tem acesso total ao contexto da plataforma:
-
-PLATAFORMA MKON AI BUSINESS:
-- Sistema privado de gestão de negócio para agência de serviços digitais (websites, NFC, SEO)
-- Módulos: Dashboard, CRM (empresas/leads), Prospeção, Agentes IA, Mensagens, Websites, Propostas, NFC, Projetos, Financeiro, Relatórios, Administração
-- Stack: React + TypeScript + Supabase (PostgreSQL + RLS + Auth) + Vite + Tailwind
-- Base de dados: administradores, companies, leads, contacts, proposals, sales, projects, expenses, transactions, ai_agents, ai_tasks, integrations, nfc_devices, websites, conversations, messages
-
-CAPACIDADES DO BOT:
-- Analisar e explicar qualquer módulo do sistema
-- Ajudar a criar queries SQL para o Supabase
-- Sugerir melhorias de código ou fluxo de negócio
-- Responder perguntas sobre os dados e como usar o sistema
-- Ajudar a configurar integrações (FreeLLMAPI, Groq, Gemini, OpenAI, Google Places, WhatsApp, n8n)
-- Criar conteúdos (textos, emails, propostas, mensagens de prospeção)
-- Analisar estratégias comerciais
-
-Responda sempre em Português (Portugal), de forma clara, direta e prestável.
-Se pedir para executar código ou fazer algo no sistema, explique os passos ou forneça o código completo.`
-
 /* ─── Eye component ─── */
 function Eye({ mouseX, mouseY, eyeRef }: { mouseX: number; mouseY: number; eyeRef: { current: HTMLDivElement | null } }) {
     const [pupilPos, setPupilPos] = useState({ x: 0, y: 0 })
@@ -145,7 +139,6 @@ export function AiRobot() {
     const [input, setInput] = useState('')
     const [thinking, setThinking] = useState(false)
     const [error, setError] = useState('')
-    const [model, setModel] = useState<string>('auto')
     const bottomRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -169,9 +162,9 @@ export function AiRobot() {
     // Welcome message
     useEffect(() => {
         if (open && messages.length === 0) {
-            const apiStatus = isAiReady()
-                ? `Pronto! Ligado a ${getProviderLabel()}.`
-                : '⚠️ Sem chave de IA configurada. Vá a Administração → Integrações e adicione a chave FreeLLMAPI.'
+            const apiStatus = isConfigured
+                ? 'Pronto! Ligado ao agente MKON (dados reais do sistema).'
+                : '⚠️ Supabase não configurado neste site.'
             setMessages([{
                 id: 'welcome',
                 role: 'assistant',
@@ -185,8 +178,8 @@ export function AiRobot() {
         const text = input.trim()
         if (!text || thinking) return
 
-        if (!isAiReady()) {
-            setError('Chave de IA não configurada. Adicione a chave FreeLLMAPI em Administração → Integrações.')
+        if (!isConfigured) {
+            setError('Supabase não configurado neste site.')
             return
         }
 
@@ -201,21 +194,20 @@ export function AiRobot() {
             const history = updatedMessages
                 .filter((m) => m.id !== 'welcome')
                 .map((m) => ({ role: m.role, content: m.content }))
-            const r = await chatAI([{ role: 'system', content: SYSTEM_PROMPT }, ...history], { model, temperature: 0.7, maxTokens: 2048 })
-            setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: r.text, ts: Date.now() }])
+            const r = await callAgent(history)
+            setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: r.reply, ts: Date.now() }])
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Erro desconhecido.')
         } finally {
             setThinking(false)
         }
-    }, [input, thinking, messages, model])
+    }, [input, thinking, messages])
 
     const onKey = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
     }
 
-    const anyReady = isAiReady()
-    const isFree = getActiveProvider() === 'freellm'
+    const anyReady = isConfigured
     const isAiOnline = anyReady
 
     return (
@@ -266,22 +258,12 @@ export function AiRobot() {
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold">MKON Bot</p>
                             <p className="text-[10px] text-white/40 truncate">
-                                {thinking ? 'A pensar…' : anyReady ? getProviderLabel() : 'Sem chave de IA — configure em Administração'}
+                                {thinking ? 'A pensar…' : anyReady ? 'Agente MKON · dados reais' : 'Supabase não configurado'}
                             </p>
                         </div>
                     )}
                     {minimized && <span className="flex-1 text-sm font-semibold">MKON Bot</span>}
                     <div className="flex items-center gap-1">
-                        {!minimized && isFree && (
-                            <select
-                                value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                                className="max-w-[120px] rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-white/60 focus:outline-none"
-                                title="Modelo FreeLLMAPI"
-                            >
-                                {FREELLM_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label.replace(' (recomendado)', '')}</option>)}
-                            </select>
-                        )}
                         <button onClick={() => setMinimized((v) => !v)} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title={minimized ? 'Expandir' : 'Minimizar'}>
                             {minimized ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
                         </button>
@@ -333,7 +315,7 @@ export function AiRobot() {
                             {!anyReady && (
                                 <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.07] px-3 py-1.5 text-[10px] text-amber-300">
                                     <Zap className="h-3 w-3 shrink-0" />
-                                    Adicione a chave FreeLLMAPI em Administração → Integrações
+                                    Supabase não configurado neste site
                                 </div>
                             )}
                             <div className="flex items-end gap-2">
