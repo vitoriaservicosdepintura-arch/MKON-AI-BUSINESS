@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bot, Play, Pause, AlertCircle, CheckCircle, Clock, Cpu, Zap, BarChart3, ChevronDown, ChevronUp, Send, Loader2, Plus } from 'lucide-react'
+import { Bot, Play, Pause, AlertCircle, CheckCircle, Clock, Cpu, Zap, BarChart3, ChevronDown, ChevronUp, Send, Loader2, Plus, Power } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
@@ -12,6 +12,7 @@ type Agent = {
     id: string; code: string; name: string; description: string; status: string
     model: string; provider: string; daily_task_limit: number; monthly_budget_eur: number
     last_error: string | null; sort_order: number; system_prompt?: string | null
+    auto_enabled?: boolean; auto_task?: string | null; last_auto_run_at?: string | null
 }
 
 /** Com FreeLLMAPI, modelos antigos (ex.: gpt-4o-mini) passam a 'auto'. */
@@ -61,6 +62,49 @@ export default function Agentes() {
     }, [demo])
     useEffect(() => { load() }, [load])
 
+    /** Liga/desliga o modo automático de um agente. Ligar também ativa o agente. */
+    const toggleAuto = async (agent: Agent) => {
+        if (demo) { toast.push('info', 'Modo demo — sem efeito real.'); return }
+        const on = !agent.auto_enabled
+        const patch: Record<string, unknown> = { auto_enabled: on }
+        if (on) patch.status = 'ativo'
+        const { error } = await supabase.from('ai_agents').update(patch).eq('id', agent.id)
+        if (error) return toast.push('error', error.message)
+        toast.push('success', on ? `${agent.name} ligado em automático.` : `${agent.name} desligado do automático.`)
+        load()
+    }
+
+    /** Liga ou desliga o automático de todos os agentes de uma vez. */
+    const setAllAuto = async (on: boolean) => {
+        if (demo) { toast.push('info', 'Modo demo — sem efeito real.'); return }
+        const patch: Record<string, unknown> = { auto_enabled: on }
+        if (on) patch.status = 'ativo'
+        const { error } = await supabase.from('ai_agents').update(patch).not('id', 'is', null)
+        if (error) return toast.push('error', error.message)
+        toast.push('success', on ? 'Todos os agentes ligados em automático.' : 'Automático desligado para todos.')
+        load()
+    }
+
+    /** Executa já uma rodada automática (mesma lógica do agendador). */
+    const runAutoNow = async () => {
+        if (demo) { toast.push('info', 'Modo demo — sem efeito real.'); return }
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mkon-auto`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string },
+                body: '{}',
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`)
+            toast.push('success', data.skipped ? data.skipped : `Execução concluída: ${data.executados ?? 0} agente(s).`)
+            load()
+        } catch (e) {
+            toast.push('error', e instanceof Error ? e.message : 'Falha ao executar.')
+        }
+    }
+
     const toggleStatus = async (agent: Agent) => {
         if (demo) { toast.push('info', 'Modo demo — sem efeito real.'); return }
         const next = agent.status === 'ativo' ? 'pausado' : 'ativo'
@@ -97,8 +141,10 @@ export default function Agentes() {
             <PageHeader
                 title="Agentes de IA"
                 description="Centro de controlo dos agentes especializados. Ative, configure e monitorize cada agente."
-                actions={<div className="flex gap-2">
+                actions={<div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> Novo agente</Button>
+                    <Button size="sm" variant="outline" onClick={() => setAllAuto(!agents.every(a => a.auto_enabled))}><Power className="h-3.5 w-3.5" /> {agents.every(a => a.auto_enabled) ? 'Desligar todos' : 'Ligar todos'} (automático)</Button>
+                    <Button size="sm" variant="outline" onClick={runAutoNow}><Zap className="h-3.5 w-3.5" /> Executar automáticos agora</Button>
                     {agents.some(a => a.status !== 'ativo') && <Button size="sm" onClick={activateAll}><Play className="h-3.5 w-3.5" /> Ativar todos</Button>}
                 </div>}
             />
@@ -152,6 +198,9 @@ export default function Agentes() {
                                             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                         </Button>
                                         <RunTaskButton agent={agent} onDone={load} disabled={!demo && agent.status !== 'ativo'} />
+                                        <Button size="sm" variant={agent.auto_enabled ? 'primary' : 'outline'} onClick={() => toggleAuto(agent)} title="Executa esta função automaticamente">
+                                            <Power className="h-3.5 w-3.5" /> {agent.auto_enabled ? 'Automático: ligado' : 'Automático: desligado'}
+                                        </Button>
                                         <Button size="sm" variant={agent.status === 'ativo' ? 'outline' : 'primary'} onClick={() => toggleStatus(agent)}>
                                             {agent.status === 'ativo' ? <><Pause className="h-3.5 w-3.5" /> Pausar</> : <><Play className="h-3.5 w-3.5" /> Ativar</>}
                                         </Button>
@@ -329,7 +378,7 @@ function RunTaskButton({ agent, onDone, disabled }: { agent: Agent; onDone: () =
 /** Criar um novo agente na base de dados (aparece nesta página). */
 function NewAgentModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
     const toast = useToast()
-    const [form, setForm] = useState({ name: '', description: '', system_prompt: '', daily_task_limit: '50', monthly_budget_eur: '20' })
+    const [form, setForm] = useState({ name: '', description: '', system_prompt: '', auto_task: '', daily_task_limit: '50', monthly_budget_eur: '20' })
     const [busy, setBusy] = useState(false)
 
     const save = async (e: React.FormEvent) => {
@@ -342,6 +391,7 @@ function NewAgentModal({ open, onClose, onSaved }: { open: boolean; onClose: () 
             name: form.name.trim(),
             description: form.description.trim(),
             system_prompt: form.system_prompt.trim() || null,
+            auto_task: form.auto_task.trim() || null,
             status: 'inativo',
             model: 'auto',
             provider: 'freellmapi',
@@ -351,7 +401,7 @@ function NewAgentModal({ open, onClose, onSaved }: { open: boolean; onClose: () 
         setBusy(false)
         if (error) return toast.push('error', error.message)
         toast.push('success', 'Agente criado. Ative-o para dar tarefas.')
-        setForm({ name: '', description: '', system_prompt: '', daily_task_limit: '50', monthly_budget_eur: '20' })
+        setForm({ name: '', description: '', system_prompt: '', auto_task: '', daily_task_limit: '50', monthly_budget_eur: '20' })
         onSaved(); onClose()
     }
 
@@ -362,6 +412,9 @@ function NewAgentModal({ open, onClose, onSaved }: { open: boolean; onClose: () 
                 <Field label="Descrição"><input className="input" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="O que este agente faz" /></Field>
                 <Field label="Regras (opcional)" hint="Instruções específicas para este agente.">
                     <textarea className="input w-full resize-none" rows={4} value={form.system_prompt} onChange={e => setForm(f => ({ ...f, system_prompt: e.target.value }))} />
+                </Field>
+                <Field label="Tarefa automática" hint="O que este agente faz sozinho quando estiver ligado em automático (por exemplo: procurar oportunidades sem website e propor as melhores).">
+                    <textarea className="input w-full resize-none" rows={3} value={form.auto_task} onChange={e => setForm(f => ({ ...f, auto_task: e.target.value }))} />
                 </Field>
                 <div className="grid grid-cols-2 gap-3">
                     <Field label="Limite diário"><input className="input" type="number" min="0" value={form.daily_task_limit} onChange={e => setForm(f => ({ ...f, daily_task_limit: e.target.value }))} /></Field>
@@ -374,13 +427,13 @@ function NewAgentModal({ open, onClose, onSaved }: { open: boolean; onClose: () 
 
 function EditAgentModal({ agent, onClose, onSaved }: { agent: Agent | null; onClose: () => void; onSaved: () => void }) {
     const toast = useToast()
-    const [form, setForm] = useState({ daily_task_limit: '', monthly_budget_eur: '', model: '' })
+    const [form, setForm] = useState({ daily_task_limit: '', monthly_budget_eur: '', model: '', auto_task: '' })
     const [busy, setBusy] = useState(false)
     const demo = isDemoActive()
 
     useEffect(() => {
         if (!agent) return
-        setForm({ daily_task_limit: String(agent.daily_task_limit), monthly_budget_eur: String(agent.monthly_budget_eur), model: isFreeLlmModel(agent.model) ? agent.model : 'auto' })
+        setForm({ daily_task_limit: String(agent.daily_task_limit), monthly_budget_eur: String(agent.monthly_budget_eur), model: isFreeLlmModel(agent.model) ? agent.model : 'auto', auto_task: agent.auto_task ?? '' })
     }, [agent])
 
     const save = async (e: React.FormEvent) => {
@@ -392,6 +445,7 @@ function EditAgentModal({ agent, onClose, onSaved }: { agent: Agent | null; onCl
             daily_task_limit: Number(form.daily_task_limit),
             monthly_budget_eur: Number(form.monthly_budget_eur),
             model: form.model,
+            auto_task: form.auto_task.trim() || null,
             provider: 'freellmapi',
         }).eq('id', agent.id)
         setBusy(false)
@@ -409,6 +463,9 @@ function EditAgentModal({ agent, onClose, onSaved }: { agent: Agent | null; onCl
                             {FREELLM_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                         </optgroup>
                     </select>
+                </Field>
+                <Field label="Tarefa automática" hint="O que este agente faz sozinho quando estiver ligado em automático.">
+                    <textarea className="input w-full resize-none" rows={3} value={form.auto_task} onChange={e => setForm(f => ({ ...f, auto_task: e.target.value }))} />
                 </Field>
                 <Field label="Limite diário de tarefas"><input className="input" type="number" min="0" value={form.daily_task_limit} onChange={e => setForm(f => ({ ...f, daily_task_limit: e.target.value }))} /></Field>
                 <Field label="Orçamento mensal (€)"><input className="input" type="number" min="0" step="0.01" value={form.monthly_budget_eur} onChange={e => setForm(f => ({ ...f, monthly_budget_eur: e.target.value }))} /></Field>
