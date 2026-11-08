@@ -12,6 +12,7 @@ import { cn, normalizeWebsite, relativeTime } from '@/lib/utils'
 import { isDemoActive } from '@/lib/demo'
 import { analyzeLeadWithAI, generateProspectingMessage, isAiReady } from '@/lib/ai'
 import { speakNatural } from '@/lib/voice'
+import { loadProspectCompanies, dismissProspect, dismissAllProspects, type ProspectCompany } from '@/lib/prospect'
 
 type Company = {
     id: string; name: string; category: string | null; city: string | null; region: string | null
@@ -454,6 +455,20 @@ function MapSearch({ onDone }: { onDone: () => void }) {
     const [selected, setSelected] = useState<MapPlace | null>(null)
     const [summary, setSummary] = useState('')
     const [steps, setSteps] = useState<string[]>([])
+    const [prospects, setProspects] = useState<ProspectCompany[]>([])
+    const refreshProspects = useCallback(() => {
+        loadProspectCompanies().then(setProspects).catch(() => setProspects([]))
+    }, [])
+    useEffect(() => { refreshProspects() }, [refreshProspects])
+
+    const clearOne = async (id: string) => {
+        try { await dismissProspect(id); setProspects((ps) => ps.filter((p) => p.id !== id)) }
+        catch (e) { toast.push('error', e instanceof Error ? e.message : 'Não foi possível limpar.') }
+    }
+    const clearAll = async () => {
+        try { await dismissAllProspects(prospects.map((p) => p.id)); setProspects([]); toast.push('success', 'Resultados limpos. Continuam no CRM.') }
+        catch (e) { toast.push('error', e instanceof Error ? e.message : 'Não foi possível limpar.') }
+    }
     const [creating, setCreating] = useState(false)
     const mapEl = useRef<HTMLDivElement>(null)
     const mapRef = useRef<L.Map | null>(null)
@@ -525,6 +540,7 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             void (async () => { for (const m of msgs) await speakNatural(m, getToken, vUrl, vKey) })()
             toast.push('success', 'Equipa de agentes concluiu a etapa.')
             onDone()
+            refreshProspects()
         } catch (e) {
             toast.push('error', e instanceof Error ? e.message : 'Falha na pesquisa.')
         } finally { setBusy(false) }
@@ -574,6 +590,23 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             <div ref={mapEl} className="mt-3 h-[360px] w-full overflow-hidden rounded-xl border border-white/[0.08]" />
 
             {summary && <p className="mt-3 text-xs text-white/60">{summary}</p>}
+            {prospects.length > 0 && (
+                <div className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.02]">
+                    <div className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-2.5">
+                        <p className="text-xs font-semibold">Resultados da prospecção <span className="font-normal text-white/40">({prospects.length})</span></p>
+                        <Button size="sm" variant="ghost" onClick={clearAll}>Limpar todos</Button>
+                    </div>
+                    <ul className="divide-y divide-white/[0.05]">
+                        {prospects.map((p) => (
+                            <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-2 text-xs">
+                                <span className="min-w-0 truncate">{p.name} <span className="text-white/35">{p.city ? `· ${p.city}` : ''} {p.website ? '· tem site' : '· sem site'}</span></span>
+                                <Button size="sm" variant="ghost" onClick={() => clearOne(p.id)}>Limpar</Button>
+                            </li>
+                        ))}
+                    </ul>
+                    <p className="px-4 py-2 text-[11px] text-white/30">Limpar retira estes resultados da Prospecção e do Dashboard. Não apaga as empresas do CRM.</p>
+                </div>
+            )}
             {steps.length > 0 && (
                 <ol className="mt-2 space-y-1.5">
                     {steps.map((m, i) => <li key={i} className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/75">{i + 1}. {m}</li>)}

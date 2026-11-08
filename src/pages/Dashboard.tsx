@@ -10,6 +10,7 @@ import {
   FlaskConical, KeyRound, Plug,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { loadProspectCompanies, type ProspectCompany } from '@/lib/prospect'
 import { isConfigured } from '@/lib/supabase'
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/ui'
 import { eur, relativeTime } from '@/lib/utils'
@@ -116,6 +117,38 @@ function ConfigBanner() {
   }
 
   return null
+}
+
+/** Só o que foi encontrado pela prospecção no mapa (limpo em Prospecção). */
+function ProspectPanel() {
+  const nav = useNavigate()
+  const [rows, setRows] = useState<ProspectCompany[] | null>(null)
+  useEffect(() => {
+    loadProspectCompanies(8).then(setRows).catch(() => setRows([]))
+  }, [])
+  return (
+    <div className="card mb-6 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold">Prospecção</p>
+          <p className="text-[11px] text-white/40">Empresas encontradas no mapa e ainda não limpas</p>
+        </div>
+        <button onClick={() => nav('/prospeccao')} className="text-xs text-brand-soft hover:underline">Abrir Prospecção</button>
+      </div>
+      {rows === null ? <p className="text-xs text-white/30">A carregar…</p> : rows.length === 0 ? (
+        <p className="text-xs text-white/30">Nada por mostrar. Faça uma pesquisa no mapa em Prospecção.</p>
+      ) : (
+        <ul className="divide-y divide-white/[0.05]">
+          {rows.map((r) => (
+            <li key={r.id} className="flex items-center justify-between gap-3 py-2 text-xs">
+              <span className="truncate text-white/80">{r.name}</span>
+              <span className="shrink-0 text-white/35">{r.city ?? ''} {r.website ? '· tem site' : '· sem site'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 export default function Dashboard() {
@@ -231,6 +264,8 @@ export default function Dashboard() {
       <PageHeader title="Dashboard" description={demo ? 'Visualização com dados fictícios — modo demonstração ativo.' : 'Inteligência comercial em tempo real. Todos os números vêm da base de dados.'} />
 
       <ConfigBanner />
+
+      <ProspectPanel />
 
       <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
         {quick.map(({ label, icon: Icon, to }) => (
