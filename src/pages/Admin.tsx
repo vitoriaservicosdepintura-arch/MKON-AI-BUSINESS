@@ -9,6 +9,7 @@ import { isDemoActive, DEMO } from '@/lib/demo'
 import { getApiKey, setApiKey, hasApiKey, API_KEY_META, detectProviderFromKey, getUniversalUrl, setUniversalUrl, type ApiKeyId } from '@/lib/apikeys'
 import { effectiveModel } from '@/lib/llm'
 import { isAiReady } from '@/lib/ai'
+import Agentes from '@/pages/Agentes'
 
 type Tab = 'integracoes' | 'agentes' | 'automacao' | 'logs' | 'dados' | 'definicoes'
 const TABS: { key: Tab; label: string; icon: typeof Plug }[] = [
@@ -463,6 +464,7 @@ function Automation() {
   if (!mode) return <Skeleton className="h-48" />
   return (
     <>
+      <div className="mb-8"><Agentes /></div>
       {kill && <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200"><ShieldAlert className="h-4 w-4" /> Botão de emergência ativo — nada é enviado, independentemente do modo.</div>}
       <div className="grid gap-3 md:grid-cols-3">
         {modes.map((m) => (
