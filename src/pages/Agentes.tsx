@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bot, Play, Pause, AlertCircle, CheckCircle, Clock, Cpu, Zap, BarChart3, ChevronDown, ChevronUp, Send, Loader2 } from 'lucide-react'
+import { Bot, Play, Pause, AlertCircle, CheckCircle, Clock, Cpu, Zap, BarChart3, ChevronDown, ChevronUp, Send, Loader2, Plus } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 import { cn, relativeTime } from '@/lib/utils'
 import { isDemoActive, DEMO } from '@/lib/demo'
-import { chatAI, isAiReady, getProviderLabel } from '@/lib/ai'
+import { isAiReady, getProviderLabel } from '@/lib/ai'
 import { FREELLM_MODELS, effectiveModel, isFreeLlmModel } from '@/lib/llm'
 
 type Agent = {
@@ -46,6 +46,7 @@ export default function Agentes() {
     const [loading, setLoading] = useState(!demo)
     const [editAgent, setEditAgent] = useState<Agent | null>(null)
     const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
+    const [creating, setCreating] = useState(false)
 
     const load = useCallback(async () => {
         if (demo) return
@@ -96,7 +97,10 @@ export default function Agentes() {
             <PageHeader
                 title="Agentes de IA"
                 description="Centro de controlo dos agentes especializados. Ative, configure e monitorize cada agente."
-                actions={agents.some(a => a.status !== 'ativo') ? <Button size="sm" onClick={activateAll}><Play className="h-3.5 w-3.5" /> Ativar todos</Button> : undefined}
+                actions={<div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> Novo agente</Button>
+                    {agents.some(a => a.status !== 'ativo') && <Button size="sm" onClick={activateAll}><Play className="h-3.5 w-3.5" /> Ativar todos</Button>}
+                </div>}
             />
 
             {/* Info banner */}
@@ -147,7 +151,7 @@ export default function Agentes() {
                                         <Button variant="ghost" size="sm" onClick={() => setExpandedAgent(expanded ? null : agent.id)}>
                                             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                         </Button>
-                                        {isAiReady() && <RunTaskButton agent={agent} onDone={load} disabled={!demo && agent.status !== 'ativo'} />}
+                                        <RunTaskButton agent={agent} onDone={load} disabled={!demo && agent.status !== 'ativo'} />
                                         <Button size="sm" variant={agent.status === 'ativo' ? 'outline' : 'primary'} onClick={() => toggleStatus(agent)}>
                                             {agent.status === 'ativo' ? <><Pause className="h-3.5 w-3.5" /> Pausar</> : <><Play className="h-3.5 w-3.5" /> Ativar</>}
                                         </Button>
@@ -209,8 +213,25 @@ export default function Agentes() {
             </div>
 
             <EditAgentModal agent={editAgent} onClose={() => setEditAgent(null)} onSaved={load} />
+            <NewAgentModal open={creating} onClose={() => setCreating(false)} onSaved={load} />
         </>
     )
+}
+
+/** Chama o agente no servidor (Edge Function mkon-agent) com a sessão do proprietário. */
+async function runAgentOnServer(agentCode: string, task: string): Promise<{ text: string; routedVia: string; provider: string; model: string; inputTokens: number; outputTokens: number }> {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
+    const url = import.meta.env.VITE_SUPABASE_URL as string
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+    const res = await fetch(`${url}/functions/v1/mkon-agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: anonKey },
+        body: JSON.stringify({ agent_code: agentCode, messages: [{ role: 'user', content: task }] }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data?.error ?? `O agente devolveu erro ${res.status}.`)
+    return { text: String(data.reply ?? ''), routedVia: 'mkon-agent', provider: 'mkon-agent', model: 'mkon-agent', inputTokens: 0, outputTokens: 0 }
 }
 
 /* ── Run Task inline ── */
@@ -242,13 +263,8 @@ function RunTaskButton({ agent, onDone, disabled }: { agent: Agent; onDone: () =
 
         const startedAt = new Date().toISOString()
         try {
-            const system = [
-                `Você é o agente "${agent.name}" no sistema MKON AI Business, uma agência de serviços digitais em Portugal.`,
-                agent.description,
-                agent.system_prompt ? `Regras: ${agent.system_prompt}` : '',
-                'Responda em Português de Portugal. Seja concreto e útil.',
-            ].filter(Boolean).join('\n')
-            const r = await chatAI([{ role: 'system', content: system }, { role: 'user', content: task }], { model: modelForAgent(agent) })
+            // Execução no servidor: aplica o prompt do agente e as habilidades adicionadas.
+            const r = await runAgentOnServer(agent.code, task)
             setResult(r.text)
             setVia(r.routedVia ?? `${r.provider}/${r.model}`)
 
@@ -307,6 +323,52 @@ function RunTaskButton({ agent, onDone, disabled }: { agent: Agent; onDone: () =
                 </div>
             </Modal>
         </>
+    )
+}
+
+/** Criar um novo agente na base de dados (aparece nesta página). */
+function NewAgentModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+    const toast = useToast()
+    const [form, setForm] = useState({ name: '', description: '', system_prompt: '', daily_task_limit: '50', monthly_budget_eur: '20' })
+    const [busy, setBusy] = useState(false)
+
+    const save = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!form.name.trim() || !form.description.trim()) return toast.push('error', 'Indique o nome e a descrição.')
+        const code = form.name.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)
+        setBusy(true)
+        const { error } = await supabase.from('ai_agents').insert({
+            code: `${code}-${Date.now().toString(36)}`,
+            name: form.name.trim(),
+            description: form.description.trim(),
+            system_prompt: form.system_prompt.trim() || null,
+            status: 'inativo',
+            model: 'auto',
+            provider: 'freellmapi',
+            daily_task_limit: Number(form.daily_task_limit) || 50,
+            monthly_budget_eur: Number(form.monthly_budget_eur) || 20,
+        })
+        setBusy(false)
+        if (error) return toast.push('error', error.message)
+        toast.push('success', 'Agente criado. Ative-o para dar tarefas.')
+        setForm({ name: '', description: '', system_prompt: '', daily_task_limit: '50', monthly_budget_eur: '20' })
+        onSaved(); onClose()
+    }
+
+    return (
+        <Modal open={open} onClose={onClose} title="Novo agente" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" form="new-agent" loading={busy}>Criar agente</Button></>}>
+            <form id="new-agent" onSubmit={save} className="space-y-4">
+                <Field label="Nome"><input className="input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex.: Agente de propostas" /></Field>
+                <Field label="Descrição"><input className="input" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="O que este agente faz" /></Field>
+                <Field label="Regras (opcional)" hint="Instruções específicas para este agente.">
+                    <textarea className="input w-full resize-none" rows={4} value={form.system_prompt} onChange={e => setForm(f => ({ ...f, system_prompt: e.target.value }))} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                    <Field label="Limite diário"><input className="input" type="number" min="0" value={form.daily_task_limit} onChange={e => setForm(f => ({ ...f, daily_task_limit: e.target.value }))} /></Field>
+                    <Field label="Orçamento mensal (€)"><input className="input" type="number" min="0" step="0.01" value={form.monthly_budget_eur} onChange={e => setForm(f => ({ ...f, monthly_budget_eur: e.target.value }))} /></Field>
+                </div>
+            </form>
+        </Modal>
     )
 }
 
