@@ -13,6 +13,7 @@ import Agentes from '@/pages/Agentes'
 import Mensagens from '@/pages/Mensagens'
 import Websites from '@/pages/Websites'
 import Propostas from '@/pages/Propostas'
+import Reunioes from '@/pages/Reunioes'
 import NfcPage from '@/pages/Nfc'
 import Projetos from '@/pages/Projetos'
 import Financeiro from '@/pages/Financeiro'
@@ -107,6 +108,7 @@ export default function App() {
               <Route path="agentes" element={<Agentes />} />
               <Route path="mensagens" element={<Mensagens />} />
               <Route path="websites" element={<Websites />} />
+              <Route path="reunioes" element={<Reunioes />} />
               <Route path="propostas" element={<Propostas />} />
               <Route path="nfc" element={<NfcPage />} />
               <Route path="projetos" element={<Projetos />} />
