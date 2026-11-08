@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Radar, Bot, Inbox, Kanban, Globe, FileText, Nfc, Wallet,
+  LayoutDashboard, Radar, Inbox, Kanban, Globe, FileText, Nfc, Wallet,
   FolderKanban, BarChart3, ShieldCheck, ImagePlus, type LucideIcon,
 } from 'lucide-react'
 
@@ -14,7 +14,6 @@ export type NavItem = {
 export const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, stage: 1, description: 'Visão geral da inteligência comercial' },
   { to: '/prospeccao', label: 'Prospecção', icon: Radar, stage: 1, description: 'Pesquisa de empresas, análise e pontuação de oportunidades' },
-  { to: '/agentes', label: 'Agentes de IA', icon: Bot, stage: 1, description: 'Centro de controle dos agentes especializados' },
   { to: '/mensagens', label: 'Mensagens', icon: Inbox, stage: 1, description: 'Caixa de entrada comercial centralizada' },
   { to: '/crm', label: 'CRM', icon: Kanban, stage: 1, description: 'Leads, clientes e negociações' },
   { to: '/websites', label: 'Websites', icon: Globe, stage: 1, description: 'Gerador de demonstrações e biblioteca de templates' },
