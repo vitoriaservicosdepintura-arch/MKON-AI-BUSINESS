@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle } from 'lucide-react'
+import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle, Mic } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase, isConfigured } from '@/lib/supabase'
 import { playBotOpen, playBotClose, playClick } from '@/lib/sfx'
@@ -187,8 +187,8 @@ export function AiRobot() {
         }
     }, [open, messages.length])
 
-    const send = useCallback(async () => {
-        const text = input.trim()
+    const send = useCallback(async (override?: unknown) => {
+        const text = (typeof override === 'string' ? override : input).trim()
         if (!text || thinking) return
         playClick()
 
@@ -223,6 +223,31 @@ export function AiRobot() {
 
     const onKey = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+    }
+
+    /* Microfone: reconhecimento de voz do browser (pt-PT). Envia a frase quando termina. */
+    const [listening, setListening] = useState(false)
+    const recognitionRef = useRef<any>(null)
+    const speechSupported = typeof window !== 'undefined' && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+
+    const toggleMic = () => {
+        if (listening) { recognitionRef.current?.stop(); return }
+        const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        if (!Ctor) return
+        const rec = new Ctor()
+        rec.lang = 'pt-PT'
+        rec.interimResults = false
+        rec.continuous = false
+        rec.onresult = (ev: any) => {
+            const said = String(ev.results?.[0]?.[0]?.transcript ?? '').trim()
+            if (said) { setInput(said); send(said) }
+        }
+        rec.onerror = (ev: any) => setError(ev?.error === 'not-allowed' ? 'Permita o acesso ao microfone no browser.' : 'Não consegui ouvir. Tente novamente.')
+        rec.onend = () => { setListening(false); recognitionRef.current = null }
+        recognitionRef.current = rec
+        setError('')
+        setListening(true)
+        rec.start()
     }
 
     const anyReady = isConfigured
@@ -347,8 +372,19 @@ export function AiRobot() {
                                     disabled={thinking || !anyReady}
                                     className="flex-1 resize-none rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-white placeholder-white/25 focus:border-brand/40 focus:outline-none focus:ring-0 disabled:opacity-40"
                                 />
+                                {speechSupported && (
+                                    <button
+                                        onClick={toggleMic}
+                                        disabled={thinking || !anyReady}
+                                        className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition disabled:opacity-40', listening ? 'border-red-400/60 bg-red-500/20 text-red-200 animate-pulse' : 'border-white/[0.1] bg-white/[0.04] text-white/70 hover:bg-white/[0.08]')}
+                                        title={listening ? 'A ouvir… clique para parar' : 'Falar com o agente'}
+                                        aria-label="Microfone"
+                                    >
+                                        <Mic className="h-4 w-4" />
+                                    </button>
+                                )}
                                 <button
-                                    onClick={send}
+                                    onClick={() => send()}
                                     disabled={!input.trim() || thinking || !anyReady}
                                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-on-brand transition hover:bg-brand-soft disabled:opacity-40 disabled:pointer-events-none"
                                     title="Enviar (Enter)"

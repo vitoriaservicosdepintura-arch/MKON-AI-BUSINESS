@@ -218,12 +218,24 @@ Deno.serve(async (req) => {
     const llmModel = Deno.env.get('LLM_MODEL') ?? 'auto'
     if (!llmBase || !llmKey) return json({ error: 'LLM_BASE_URL ou LLM_API_KEY não configurados nos segredos do Supabase.' }, 500)
 
-    let body: { messages?: { role: 'user' | 'assistant'; content: string }[] }
+    let body: { messages?: { role: 'user' | 'assistant'; content: string }[]; agent_code?: string }
     try { body = await req.json() } catch { return json({ error: 'Pedido inválido.' }, 400) }
     const history = (body.messages ?? []).filter((m) => m && typeof m.content === 'string').slice(-30)
     if (history.length === 0) return json({ error: 'Mensagem vazia.' }, 400)
 
-    const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history]
+    // Habilidades ativas (adicionadas em Administração → Automação): ensinam o agente a agir no sistema.
+    const { data: skills } = await sb.from('agent_skills').select('name,content').eq('enabled', true).order('created_at').limit(20)
+    const skillsBlock = (skills ?? []).map((s) => `### ${s.name}\n${String(s.content).slice(0, 4000)}`).join('\n\n').slice(0, 20000)
+    // Agente específico (página Agentes): usa o nome, descrição e regras definidos na base de dados.
+    let agentBlock = ''
+    if (body.agent_code) {
+        const { data: agent } = await sb.from('ai_agents').select('name,description,system_prompt').eq('code', String(body.agent_code)).maybeSingle()
+        if (!agent) return json({ error: 'Agente não encontrado.' }, 404)
+        agentBlock = `\n\nEstá a atuar como o agente "${agent.name}". ${agent.description}${agent.system_prompt ? `\nRegras deste agente: ${agent.system_prompt}` : ''}`
+    }
+    const systemPrompt = `${SYSTEM_PROMPT}${agentBlock}${skillsBlock ? `\n\nHabilidades adicionadas pelo proprietário (siga-as quando forem relevantes):\n${skillsBlock}` : ''}`
+
+    const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
     const toolsUsed: string[] = []
     const actions: unknown[] = []
 

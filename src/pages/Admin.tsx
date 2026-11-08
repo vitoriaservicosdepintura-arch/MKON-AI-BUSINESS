@@ -473,7 +473,131 @@ function Automation() {
         ))}
       </div>
       <p className="mt-4 text-xs text-white/35">Regras de automação detalhadas, sequências e canais são configurados na Etapa 3 e Etapa 6. Contactos com oposição registada nunca recebem mensagens comerciais (garantido na base de dados).</p>
+      <SkillsPanel />
     </>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+type SkillRow = { id: string; name: string; kind: string; source_url: string | null; content: string; enabled: boolean; created_at: string }
+
+/** Converte um link do GitHub (blob/tree) para o endereço raw, que o browser consegue ler. */
+function toRawGithubUrl(input: string): string | null {
+  try {
+    const u = new URL(input.trim())
+    if (u.hostname === 'raw.githubusercontent.com') return u.toString()
+    if (u.hostname !== 'github.com') return null
+    const parts = u.pathname.split('/').filter(Boolean)
+    if (parts.length < 5 || (parts[2] !== 'blob' && parts[2] !== 'tree')) return null
+    const [owner, repo, , branch, ...rest] = parts
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${rest.join('/')}`
+  } catch { return null }
+}
+
+function SkillsPanel() {
+  const toast = useToast()
+  const [skills, setSkills] = useState<SkillRow[] | null>(null)
+  const [name, setName] = useState('')
+  const [text, setText] = useState('')
+  const [ghUrl, setGhUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.from('agent_skills').select('id,name,kind,source_url,content,enabled,created_at').order('created_at', { ascending: false })
+    if (error) { toast.push('error', error.message); setSkills([]); return }
+    setSkills((data ?? []) as SkillRow[])
+  }, [toast])
+  useEffect(() => { load() }, [load])
+
+  const addHabilidade = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim() || !text.trim()) return toast.push('error', 'Indique um nome e a instrução.')
+    setBusy(true)
+    const { error } = await supabase.from('agent_skills').insert({ name: name.trim().slice(0, 120), kind: 'habilidade', content: text.trim().slice(0, 20000) })
+    setBusy(false)
+    if (error) return toast.push('error', error.message)
+    await logActivity('agent_skill.created', 'agent_skills', name.trim(), { kind: 'habilidade' })
+    setName(''); setText(''); toast.push('success', 'Habilidade adicionada. O robot passa a usá-la.'); load()
+  }
+
+  const addGithub = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const raw = toRawGithubUrl(ghUrl)
+    if (!raw) return toast.push('error', 'Use um link de ficheiro do GitHub (github.com/dono/repo/blob/branch/ficheiro.md).')
+    setBusy(true)
+    let content = ''
+    try {
+      const res = await fetch(raw)
+      if (!res.ok) throw new Error(`O GitHub devolveu ${res.status}. Só repositórios públicos funcionam sem token.`)
+      content = (await res.text()).slice(0, 20000)
+    } catch (err) {
+      setBusy(false)
+      return toast.push('error', err instanceof Error ? err.message : 'Não foi possível ler o ficheiro.')
+    }
+    const fileName = decodeURIComponent(raw.split('/').pop() ?? 'skill').replace(/\.(md|txt)$/i, '')
+    const { error } = await supabase.from('agent_skills').insert({ name: fileName.slice(0, 120), kind: 'github', source_url: ghUrl.trim(), content })
+    setBusy(false)
+    if (error) return toast.push('error', error.message)
+    await logActivity('agent_skill.created', 'agent_skills', fileName, { kind: 'github', source: ghUrl.trim() })
+    setGhUrl(''); toast.push('success', 'Skill do GitHub importada.'); load()
+  }
+
+  const toggle = async (s: SkillRow) => {
+    const { error } = await supabase.from('agent_skills').update({ enabled: !s.enabled }).eq('id', s.id)
+    if (error) return toast.push('error', error.message)
+    load()
+  }
+
+  const remove = async (s: SkillRow) => {
+    if (!window.confirm(`Remover "${s.name}"?`)) return
+    const { error } = await supabase.from('agent_skills').delete().eq('id', s.id)
+    if (error) return toast.push('error', error.message)
+    load()
+  }
+
+  return (
+    <div className="mt-6 grid gap-4 lg:grid-cols-2">
+      <Card>
+        <CardHeader title="Adicionar habilidades" subtitle="Ensine o robot a fazer ou saber algo sobre as páginas do sistema." />
+        <form onSubmit={addHabilidade} className="space-y-3 p-5">
+          <Field label="Nome"><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Criar proposta a partir de uma empresa" /></Field>
+          <Field label="Instrução" hint="Descreva passos, regras e onde estão os dados.">
+            <textarea className="input w-full resize-none" rows={5} value={text} onChange={e => setText(e.target.value)} />
+          </Field>
+          <Button type="submit" loading={busy}>Guardar habilidade</Button>
+        </form>
+      </Card>
+      <Card>
+        <CardHeader title="Adicionar skill do GitHub" subtitle="Cole o link de um ficheiro .md de um repositório público." />
+        <form onSubmit={addGithub} className="space-y-3 p-5">
+          <Field label="Link do ficheiro">
+            <input className="input" value={ghUrl} onChange={e => setGhUrl(e.target.value)} placeholder="https://github.com/dono/repo/blob/main/skills/SKILL.md" />
+          </Field>
+          <Button type="submit" loading={busy}>Importar skill</Button>
+        </form>
+      </Card>
+      <Card className="lg:col-span-2">
+        <CardHeader title="Habilidades e skills" subtitle={`${skills?.filter(s => s.enabled).length ?? 0} ativas`} />
+        {!skills ? <div className="p-5"><Skeleton className="h-10" /></div> : skills.length === 0 ? (
+          <EmptyState icon={<Workflow className="h-5 w-5" />} title="Sem habilidades" description="As habilidades que adicionar aparecem aqui." />
+        ) : (
+          <div className="divide-y divide-white/[0.05]">
+            {skills.map(s => (
+              <div key={s.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm">{s.name} <Badge tone={s.kind === 'github' ? 'brand' : 'neutral'}>{s.kind === 'github' ? 'GitHub' : 'Habilidade'}</Badge></p>
+                  <p className="truncate text-xs text-white/35">{s.source_url ?? s.content.slice(0, 120)}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => toggle(s)}>{s.enabled ? 'Desativar' : 'Ativar'}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => remove(s)}>Remover</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
   )
 }
 
