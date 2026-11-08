@@ -465,6 +465,14 @@ function MapSearch({ onDone }: { onDone: () => void }) {
         try { await dismissProspect(id); setProspects((ps) => ps.filter((p) => p.id !== id)) }
         catch (e) { toast.push('error', e instanceof Error ? e.message : 'Não foi possível limpar.') }
     }
+    /** Limpa o mapa, os passos da equipa e os resultados da prospecção (não apaga nada do CRM). */
+    const clearMap = async () => {
+        setPlaces([]); setSelected(null); setSteps([]); setSummary('')
+        if (prospects.length > 0) {
+            try { await dismissAllProspects(prospects.map((p) => p.id)); setProspects([]) }
+            catch (e) { toast.push('error', e instanceof Error ? e.message : 'Não foi possível limpar.') }
+        }
+    }
     const clearAll = async () => {
         try { await dismissAllProspects(prospects.map((p) => p.id)); setProspects([]); toast.push('success', 'Resultados limpos. Continuam no CRM.') }
         catch (e) { toast.push('error', e instanceof Error ? e.message : 'Não foi possível limpar.') }
@@ -588,6 +596,10 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             <p className="mt-2 text-[11px] text-white/35">Mova e aproxime o mapa para escolher a região. Laranja = sem website (oportunidade). Cinzento = já tem website.</p>
 
             <div ref={mapEl} className="mt-3 h-[360px] w-full overflow-hidden rounded-xl border border-white/[0.08]" />
+            <div className="mt-2 flex items-center justify-between gap-3">
+                <p className="text-[11px] text-white/35">{places.length > 0 ? `${places.length} locais no mapa` : 'Sem resultados no mapa'}</p>
+                <Button size="sm" variant="ghost" onClick={clearMap} disabled={places.length === 0 && steps.length === 0 && prospects.length === 0}>Limpar</Button>
+            </div>
 
             {summary && <p className="mt-3 text-xs text-white/60">{summary}</p>}
             {prospects.length > 0 && (
