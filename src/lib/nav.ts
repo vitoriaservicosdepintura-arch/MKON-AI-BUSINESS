@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Radar, Inbox, Kanban, Globe, FileText, Nfc, Wallet,
-  FolderKanban, BarChart3, ShieldCheck, ImagePlus, type LucideIcon,
+  FolderKanban, BarChart3, ShieldCheck, ImagePlus, CalendarCheck, type LucideIcon,
 } from 'lucide-react'
 
 export type NavItem = {
@@ -17,6 +17,7 @@ export const NAV: NavItem[] = [
   { to: '/mensagens', label: 'Mensagens', icon: Inbox, stage: 1, description: 'Caixa de entrada comercial centralizada' },
   { to: '/crm', label: 'CRM', icon: Kanban, stage: 1, description: 'Leads, clientes e negociações' },
   { to: '/websites', label: 'Websites', icon: Globe, stage: 1, description: 'Gerador de demonstrações e biblioteca de templates' },
+  { to: '/reunioes', label: 'Reuniões', icon: CalendarCheck, stage: 1, description: 'Agendamento de reuniões com clientes e fecho de pedidos' },
   { to: '/propostas', label: 'Propostas', icon: FileText, stage: 1, description: 'Orçamentos e propostas comerciais' },
   { to: '/nfc', label: 'NFC', icon: Nfc, stage: 1, description: 'Plaquinhas NFC, encomendas e fornecedores' },
   { to: '/loja-gifs', label: 'Loja de GIFs', icon: ImagePlus, stage: 1, description: 'Venda de ímanes personalizados e GIFs animados' },
