@@ -10,6 +10,7 @@ import {
   FlaskConical, KeyRound, Plug,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { cn } from '@/lib/utils'
 import { loadProspectCompanies, type ProspectCompany } from '@/lib/prospect'
 import { isConfigured } from '@/lib/supabase'
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, Skeleton } from '@/components/ui'
@@ -36,13 +37,25 @@ function lastMonths(n: number) {
   return out
 }
 
-function Kpi({ icon: Icon, label, value, loading, hint }: { icon: typeof Building2; label: string; value: string | number; loading: boolean; hint?: string }) {
+function Kpi({ icon: Icon, label, value, loading, hint, to }: { icon: typeof Building2; label: string; value: string | number; loading: boolean; hint?: string; to?: string }) {
+  const nav = useNavigate()
+  const clickable = !!to
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between text-white/40"><span className="text-[11px] font-medium uppercase tracking-wider">{label}</span><Icon className="h-4 w-4" strokeWidth={1.8} /></div>
+    <div
+      className={cn(
+        'card group p-4 transition-all duration-300 ease-out',
+        clickable && 'cursor-pointer hover:-translate-y-0.5 hover:border-sky-400/60 hover:shadow-[0_0_28px_rgba(56,189,248,0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70',
+      )}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? () => nav(to!) : undefined}
+      onKeyDown={clickable ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nav(to!) } } : undefined}
+      title={clickable ? `Abrir ${label}` : undefined}
+    >
+      <div className="flex items-center justify-between text-white/40"><span className="text-[11px] font-medium uppercase tracking-wider">{label}</span><Icon className={cn('h-4 w-4 transition-colors', clickable && 'group-hover:text-sky-300')} strokeWidth={1.8} /></div>
       {loading ? <Skeleton className="mt-3 h-7 w-20" /> : <div className="mt-2 text-2xl font-semibold tabular-nums tracking-tight">{value}</div>}
       {hint && <div className="mt-1 text-[11px] text-white/30">{hint}</div>}
-    </Card>
+    </div>
   )
 }
 
@@ -181,8 +194,8 @@ export default function Dashboard() {
       ; (async () => {
         const today = new Date().toISOString().slice(0, 10)
         const [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs] = await Promise.all([
-          supabase.from('companies').select('id', { count: 'exact', head: true }),
-          supabase.from('leads').select('id, stage, score, opportunity, created_at, next_action, next_action_at, companies(name, city, source_id)'),
+          supabase.from('companies').select('id', { count: 'exact', head: true }).eq('prospect_dismissed', false),
+          supabase.from('leads').select('id, stage, score, opportunity, created_at, next_action, next_action_at, companies(name, city, source_id, prospect_dismissed)'),
           supabase.from('sales').select('amount, cost, sold_at, products(name, category)'),
           supabase.from('expenses').select('amount, incurred_on, status'),
           supabase.from('proposals').select('status, created_at'),
@@ -195,14 +208,14 @@ export default function Dashboard() {
           supabase.from('messages').select('id', { count: 'exact', head: true }).eq('direction', 'entrada'),
           supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('status', 'pendente').lt('due_on', today),
           supabase.from('projects').select('id', { count: 'exact', head: true }).neq('stage', 'entregue').lt('due_on', today),
-          supabase.from('companies').select('source_id'),
+          supabase.from('companies').select('source_id, prospect_dismissed').eq('prospect_dismissed', false),
         ])
         const firstErr = [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs].find((r) => r.error)
         if (firstErr?.error) { setError(firstErr.error.message); setLoading(false); return }
         setD({
           companies: c.count ?? 0, nfcSold: nfc.count ?? 0, websitesInProd: prj.count ?? 0,
           contacts: conv.count ?? 0, replies: msgIn.count ?? 0, meetings: 0,
-          leads: (l.data ?? []) as unknown as Lead[], sales: (s.data ?? []) as unknown as Sale[],
+          leads: ((l.data ?? []) as unknown as (Lead & { companies: { prospect_dismissed?: boolean } | null })[]).filter((x) => x.companies?.prospect_dismissed !== true) as unknown as Lead[], sales: (s.data ?? []) as unknown as Sale[],
           expenses: (e.data ?? []) as Expense[], proposals: (p.data ?? []) as Proposal[],
           tasks: (t.data ?? []) as unknown as Task[], logs: (lg.data ?? []) as Log[],
           sources: (src.data ?? []) as { id: string; name: string }[],
@@ -276,20 +289,20 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-        <Kpi loading={loading} icon={Building2} label="Empresas" value={d.companies} />
-        <Kpi loading={loading} icon={UserPlus} label="Novos leads" value={m.newLeads} />
-        <Kpi loading={loading} icon={BadgeCheck} label="Qualificados" value={m.qualified} />
-        <Kpi loading={loading} icon={Flame} label="Prioritárias" value={m.priority} hint="Pontuação ≥ 75" />
-        <Kpi loading={loading} icon={Send} label="Contactos feitos" value={d.contacts} />
-        <Kpi loading={loading} icon={MessageSquareReply} label="Respostas" value={d.replies} />
+        <Kpi loading={loading} icon={Building2} label="Empresas" value={d.companies} to="/prospeccao" />
+        <Kpi loading={loading} icon={UserPlus} label="Novos leads" value={m.newLeads} to="/crm" />
+        <Kpi loading={loading} icon={BadgeCheck} label="Qualificados" value={m.qualified} to="/crm" />
+        <Kpi loading={loading} icon={Flame} label="Prioritárias" value={m.priority} hint="Pontuação ≥ 75" to="/crm" />
+        <Kpi loading={loading} icon={Send} label="Contactos feitos" value={d.contacts} to="/mensagens" />
+        <Kpi loading={loading} icon={MessageSquareReply} label="Respostas" value={d.replies} to="/mensagens" />
         <Kpi loading={loading} icon={CalendarCheck} label="Reuniões" value="—" hint="Agenda: Etapa 3" />
-        <Kpi loading={loading} icon={FileText} label="Propostas enviadas" value={m.proposalsSent} />
-        <Kpi loading={loading} icon={Handshake} label="Vendas fechadas" value={m.sold} />
-        <Kpi loading={loading} icon={Hammer} label="Em produção" value={d.websitesInProd} />
-        <Kpi loading={loading} icon={Nfc} label="NFC vendidas" value={d.nfcSold} />
-        <Kpi loading={loading} icon={Euro} label="Faturamento mês" value={eur(m.revenue)} hint="Só vendas registadas" />
-        <Kpi loading={loading} icon={Receipt} label="Despesas mês" value={eur(m.expenses)} />
-        <Kpi loading={loading} icon={TrendingUp} label="Lucro estimado" value={eur(m.profit)} hint="Antes de impostos" />
+        <Kpi loading={loading} icon={FileText} label="Propostas enviadas" value={m.proposalsSent} to="/propostas" />
+        <Kpi loading={loading} icon={Handshake} label="Vendas fechadas" value={m.sold} to="/financeiro" />
+        <Kpi loading={loading} icon={Hammer} label="Em produção" value={d.websitesInProd} to="/projetos" />
+        <Kpi loading={loading} icon={Nfc} label="NFC vendidas" value={d.nfcSold} to="/nfc" />
+        <Kpi loading={loading} icon={Euro} label="Faturamento mês" value={eur(m.revenue)} hint="Só vendas registadas" to="/financeiro" />
+        <Kpi loading={loading} icon={Receipt} label="Despesas mês" value={eur(m.expenses)} to="/financeiro" />
+        <Kpi loading={loading} icon={TrendingUp} label="Lucro estimado" value={eur(m.profit)} hint="Antes de impostos" to="/financeiro" />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
