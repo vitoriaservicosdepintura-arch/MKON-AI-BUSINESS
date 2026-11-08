@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Bot, Send, X, Minimize2, Maximize2, Loader2, Zap, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase, isConfigured } from '@/lib/supabase'
@@ -13,7 +14,9 @@ const greetAndAsk = () => {
 }
 
 /** Agente no servidor (Edge Function mkon-agent): usa a sessão de login do proprietário. */
-async function callAgent(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; tools_used: string[] }> {
+type AgentAction = { type: 'navigate'; path: string }
+
+async function callAgent(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; tools_used: string[]; actions?: AgentAction[] }> {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
     const url = import.meta.env.VITE_SUPABASE_URL as string
@@ -138,6 +141,7 @@ function Bubble({ msg }: { msg: Message }) {
 
 /* ─── Main Robot Component ─── */
 export function AiRobot() {
+    const navigate = useNavigate()
     const [open, setOpen] = useState(false)
     const [minimized, setMinimized] = useState(false)
     const [visible, setVisible] = useState(() => {
@@ -206,12 +210,16 @@ export function AiRobot() {
                 .map((m) => ({ role: m.role, content: m.content }))
             const r = await callAgent(history)
             setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: r.reply, ts: Date.now() }])
+            // Ações devolvidas pelo agente (ex.: abrir uma página do menu)
+            for (const a of r.actions ?? []) {
+                if (a.type === 'navigate' && a.path.startsWith('/')) navigate(a.path)
+            }
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Erro desconhecido.')
         } finally {
             setThinking(false)
         }
-    }, [input, thinking, messages])
+    }, [input, thinking, messages, navigate])
 
     const onKey = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }

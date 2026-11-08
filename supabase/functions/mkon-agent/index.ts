@@ -27,6 +27,23 @@ const READABLE: Record<string, { filters: string[]; select: string }> = {
     ai_tasks: { filters: ['status', 'agent_id', 'lead_id'], select: 'id,agent_id,lead_id,title,status,error_message,created_at,finished_at' },
 }
 
+/** Páginas do menu lateral que o agente pode abrir. */
+const APP_PAGES = [
+    { path: '/', label: 'Dashboard' },
+    { path: '/prospeccao', label: 'Prospecção' },
+    { path: '/agentes', label: 'Agentes IA' },
+    { path: '/mensagens', label: 'Mensagens' },
+    { path: '/crm', label: 'CRM' },
+    { path: '/websites', label: 'Websites' },
+    { path: '/propostas', label: 'Propostas' },
+    { path: '/nfc', label: 'NFC' },
+    { path: '/loja-gifs', label: 'Loja GIFs' },
+    { path: '/projetos', label: 'Projetos' },
+    { path: '/financeiro', label: 'Financeiro' },
+    { path: '/relatorios', label: 'Relatórios' },
+    { path: '/admin', label: 'Administração' },
+]
+
 const TOOLS = [
     {
         type: 'function',
@@ -57,6 +74,34 @@ const TOOLS = [
     {
         type: 'function',
         function: {
+            name: 'find_company',
+            description: 'Procura empresas pelo nome (parcial). Use antes de enviar mensagem ou criar proposta para uma empresa indicada pelo nome.',
+            parameters: {
+                type: 'object',
+                properties: { name: { type: 'string', description: 'Parte do nome da empresa' } },
+                required: ['name'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'open_page',
+            description: 'Abre uma página do menu do sistema para o proprietário. Use quando pedir para abrir, ir ou mostrar um módulo.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string', enum: APP_PAGES.map((p) => p.path), description: 'Caminho da página' },
+                },
+                required: ['path'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'create_ai_task',
             description: 'Cria uma tarefa para um agente de IA existente (fica pendente). Usar quando o proprietário pedir para criar/agendar trabalho.',
             parameters: {
@@ -78,9 +123,26 @@ const SYSTEM_PROMPT = `Você é o MKON Agent, agente de IA do sistema privado MK
 Responda sempre em Português de Portugal, de forma clara e direta, tratando o utilizador por "senhor".
 Use as ferramentas para consultar dados reais antes de afirmar qualquer número ou estado. Nunca invente dados: se uma ferramenta não devolver nada, diga-o.
 Módulos: Dashboard, CRM (empresas, leads), Prospeção, Agentes IA, Mensagens, Websites, Propostas, NFC, Projetos, Financeiro, Relatórios, Administração.
-Ao analisar propostas, avalie valor, prazo, itens, estado e próximos passos. Ao criar tarefas, confirme o que foi criado.`
+Ao analisar propostas, avalie valor, prazo, itens, estado e próximos passos. Ao criar tarefas, confirme o que foi criado.
+Para abrir um módulo use open_page. Para mensagens a empresas: procure a empresa com find_company e prepare o texto com draft_message. Nunca diga que uma mensagem foi enviada: fica à espera de aprovação do proprietário.
+Não tem acesso a pastas nem a ficheiros do computador do proprietário; diga isso se for pedido.`
 
-async function runTool(name: string, args: Record<string, unknown>, sb: SupabaseClient): Promise<unknown> {
+async function runTool(name: string, args: Record<string, unknown>, sb: SupabaseClient, actions: unknown[]): Promise<unknown> {
+    if (name === 'find_company') {
+        const q = String(args.name ?? '').replace(/[%_]/g, '').trim().slice(0, 100)
+        if (!q) return { error: 'Indique o nome da empresa.' }
+        const { data, error } = await sb.from('companies').select('id,name,city,phone,email,website').ilike('name', `%${q}%`).limit(5)
+        if (error) return { error: error.message }
+        return { matches: data ?? [], count: data?.length ?? 0 }
+    }
+
+    if (name === 'open_page') {
+        const page = APP_PAGES.find((p) => p.path === String(args.path ?? ''))
+        if (!page) return { error: 'Página não disponível.' }
+        actions.push({ type: 'navigate', path: page.path })
+        return { opened: page.label }
+    }
+
     if (name === 'get_system_overview') {
         const count = async (t: string, q?: (x: any) => any) => {
             let query = sb.from(t).select('id', { count: 'exact', head: true })
@@ -163,6 +225,7 @@ Deno.serve(async (req) => {
 
     const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history]
     const toolsUsed: string[] = []
+    const actions: unknown[] = []
 
     for (let step = 0; step < 6; step++) {
         let res: Response
@@ -187,7 +250,7 @@ Deno.serve(async (req) => {
         const calls = msg.tool_calls ?? []
         if (calls.length === 0) {
             const reply = String(msg.content ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-            return json({ reply: reply || 'Sem resposta.', tools_used: toolsUsed })
+            return json({ reply: reply || 'Sem resposta.', tools_used: toolsUsed, actions })
         }
 
         messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: calls })
@@ -195,12 +258,12 @@ Deno.serve(async (req) => {
             let args: Record<string, unknown> = {}
             try { args = JSON.parse(call.function?.arguments || '{}') } catch { /* argumentos inválidos */ }
             toolsUsed.push(call.function?.name ?? 'desconhecida')
-            const result = await runTool(call.function?.name ?? '', args, sb).catch((e) => ({ error: String(e) }))
+            const result = await runTool(call.function?.name ?? '', args, sb, actions).catch((e) => ({ error: String(e) }))
             messages.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: JSON.stringify(result) })
         }
     }
 
-    return json({ reply: 'Não consegui concluir o pedido dentro do limite de passos. Tente dividi-lo em partes mais pequenas.', tools_used: toolsUsed })
+    return json({ reply: 'Não consegui concluir o pedido dentro do limite de passos. Tente dividi-lo em partes mais pequenas.', tools_used: toolsUsed, actions })
 })
 
 function json(payload: unknown, status = 200) {
