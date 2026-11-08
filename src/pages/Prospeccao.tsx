@@ -11,6 +11,7 @@ import { CATEGORIES } from '@/lib/constants'
 import { cn, normalizeWebsite, relativeTime } from '@/lib/utils'
 import { isDemoActive } from '@/lib/demo'
 import { analyzeLeadWithAI, generateProspectingMessage, isAiReady } from '@/lib/ai'
+import { speakNatural } from '@/lib/voice'
 
 type Company = {
     id: string; name: string; category: string | null; city: string | null; region: string | null
@@ -452,6 +453,7 @@ function MapSearch({ onDone }: { onDone: () => void }) {
     const [places, setPlaces] = useState<MapPlace[]>([])
     const [selected, setSelected] = useState<MapPlace | null>(null)
     const [summary, setSummary] = useState('')
+    const [steps, setSteps] = useState<string[]>([])
     const [creating, setCreating] = useState(false)
     const mapEl = useRef<HTMLDivElement>(null)
     const mapRef = useRef<L.Map | null>(null)
@@ -505,7 +507,7 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
             const v = viewRef.current
-            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mkon-prospect`, {
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mkon-pipeline`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string },
                 body: JSON.stringify({ query: q, lat: v.lat, lng: v.lng, zoom: v.zoom }),
@@ -513,8 +515,15 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             const data = await res.json().catch(() => ({}))
             if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`)
             setPlaces((data.locais ?? []) as MapPlace[])
-            setSummary(`${data.encontradas} locais · ${data.sem_website} sem website · ${data.novas_empresas} novas empresas · ${data.ja_existiam} já existiam`)
-            toast.push('success', `${data.novas_empresas} novas empresas sem website.`)
+            const msgs: string[] = data.messages ?? []
+            setSteps(msgs)
+            setSummary(data.status === 'concluida' ? 'Equipa concluiu o trabalho. Nada foi enviado.' : 'A equipa encontrou um problema.')
+            // Cada passo é dito em voz alta, pela ordem em que aconteceu.
+            const getToken = async () => (await supabase.auth.getSession()).data.session?.access_token ?? null
+            const vUrl = import.meta.env.VITE_SUPABASE_URL as string
+            const vKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+            void (async () => { for (const m of msgs) await speakNatural(m, getToken, vUrl, vKey) })()
+            toast.push('success', 'Equipa de agentes concluiu a etapa.')
             onDone()
         } catch (e) {
             toast.push('error', e instanceof Error ? e.message : 'Falha na pesquisa.')
@@ -565,6 +574,11 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             <div ref={mapEl} className="mt-3 h-[360px] w-full overflow-hidden rounded-xl border border-white/[0.08]" />
 
             {summary && <p className="mt-3 text-xs text-white/60">{summary}</p>}
+            {steps.length > 0 && (
+                <ol className="mt-2 space-y-1.5">
+                    {steps.map((m, i) => <li key={i} className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/75">{i + 1}. {m}</li>)}
+                </ol>
+            )}
 
             {selected && (
                 <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
