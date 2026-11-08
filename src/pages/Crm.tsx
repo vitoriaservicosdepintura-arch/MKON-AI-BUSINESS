@@ -7,12 +7,13 @@ import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, Skeleton } f
 import { useToast } from '@/components/ui/Toast'
 import { CATEGORIES, OPPORTUNITY_LABEL, STAGES, opportunityFromScore, stageLabel, type LeadStage } from '@/lib/constants'
 import { cn, dateTime, eur, normalizeWebsite, relativeTime } from '@/lib/utils'
+import { PROSPECT_SOURCES, dismissProspect, dismissAllProspectSources } from '@/lib/prospect'
 
 type LeadRow = {
   id: string; company_id: string; stage: LeadStage; score: number | null; opportunity: string | null
   estimated_value: number | null; owner_notes: string | null; next_action: string | null; next_action_at: string | null
   lost_reason: string | null; created_at: string; updated_at: string
-  companies: { id: string; name: string; category: string | null; city: string | null; region: string | null; address: string | null; phone: string | null; email: string | null; website: string | null } | null
+  companies: { id: string; name: string; category: string | null; city: string | null; region: string | null; address: string | null; phone: string | null; email: string | null; website: string | null; prospect_dismissed?: boolean; lead_sources?: { code: string } | null } | null
 }
 type ContactRow = { id: string; full_name: string; role: string | null; email: string | null; phone: string | null; whatsapp: string | null; consent_commercial: boolean; opted_out: boolean }
 type View = 'kanban' | 'tabela' | 'lista' | 'calendario'
@@ -24,7 +25,7 @@ const VIEWS: { key: View; label: string; icon: typeof Kanban }[] = [
   { key: 'calendario', label: 'Calendário', icon: CalendarDays },
 ]
 const PAGE_SIZE = 10
-const SELECT = 'id, company_id, stage, score, opportunity, estimated_value, owner_notes, next_action, next_action_at, lost_reason, created_at, updated_at, companies(id, name, category, city, region, address, phone, email, website)'
+const SELECT = 'id, company_id, stage, score, opportunity, estimated_value, owner_notes, next_action, next_action_at, lost_reason, created_at, updated_at, companies(id, name, category, city, region, address, phone, email, website, prospect_dismissed, lead_sources(code))'
 
 const oppTone = (o: string | null) => (o === 'excelente' ? 'success' : o === 'elevada' ? 'brand' : o === 'moderada' ? 'warning' : 'neutral') as 'success' | 'brand' | 'warning' | 'neutral'
 
@@ -44,10 +45,22 @@ export default function Crm() {
   const [dragId, setDragId] = useState<string | null>(null)
   const [lostFor, setLostFor] = useState<LeadRow | null>(null)
 
+  /** Retira do CRM (vista) todos os leads vindos da prospecção. Não apaga nada. */
+  const clearProspectCrm = async () => {
+    if (!window.confirm('Limpar do CRM os leads vindos da prospecção? Os dados continuam guardados.')) return
+    try {
+      const n = await dismissAllProspectSources()
+      toast.push('success', `${n} lead(s) retirados do CRM.`)
+      load()
+    } catch (e) {
+      toast.push('error', e instanceof Error ? e.message : 'Não foi possível limpar.')
+    }
+  }
+
   const load = useCallback(async () => {
     const { data, error } = await supabase.from('leads').select(SELECT).order('updated_at', { ascending: false })
     if (error) setError(error.message)
-    else { setRows((data ?? []) as unknown as LeadRow[]); setError(null) }
+    else { setRows(((data ?? []) as unknown as LeadRow[]).filter((r) => r.companies?.prospect_dismissed !== true)); setError(null) }
     setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
@@ -95,7 +108,7 @@ export default function Crm() {
       <PageHeader
         title="CRM"
         description="Leads e clientes ao longo de todas as etapas comerciais."
-        actions={<Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> Novo lead</Button>}
+        actions={<div className="flex gap-2"><Button variant="ghost" onClick={clearProspectCrm}>Limpar prospecção</Button><Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> Novo lead</Button></div>}
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -360,6 +373,13 @@ function LeadModal({ lead, onClose, onChanged, onMove }: { lead: LeadRow | null;
     toast.push('success', patch.opted_out ? 'Oposição registada. Este contacto não receberá comunicações comerciais.' : 'Consentimento registado.')
   }
 
+  const fromProspect = !!c && PROSPECT_SOURCES.includes((c as any).lead_sources?.code ?? '')
+  const removeFromProspect = async () => {
+    if (!c) return
+    try { await dismissProspect(c.id); toast.push('success', 'Retirado do CRM (dados mantidos).'); onClose(); onChanged() }
+    catch (e) { toast.push('error', e instanceof Error ? e.message : 'Não foi possível retirar.') }
+  }
+
   const remove = async () => {
     const { error } = await supabase.from('leads').delete().eq('id', lead.id)
     if (error) return toast.push('error', 'Erro ao eliminar: ' + error.message)
@@ -370,6 +390,7 @@ function LeadModal({ lead, onClose, onChanged, onMove }: { lead: LeadRow | null;
   return (
     <Modal open onClose={onClose} title={c?.name ?? 'Lead'} wide footer={<>
       {confirmDelete ? (<><span className="mr-auto self-center text-xs text-red-300">Eliminar este lead?</span><Button variant="ghost" onClick={() => setConfirmDelete(false)}>Não</Button><Button variant="danger" onClick={remove}>Sim, eliminar</Button></>) : (<>
+        {fromProspect && <Button variant="ghost" onClick={removeFromProspect}>Retirar do CRM</Button>}
         <Button variant="ghost" className="mr-auto text-red-300" onClick={() => setConfirmDelete(true)}><Trash2 className="h-4 w-4" /> Eliminar</Button>
         <Button variant="ghost" onClick={onClose}>Fechar</Button><Button onClick={save} loading={busy}>Guardar</Button></>)}
     </>}>
