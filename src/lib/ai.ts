@@ -5,7 +5,8 @@
  */
 
 import { getApiKey, detectProviderFromKey } from './apikeys'
-import { isFreeLlmConfigured, llmChat, type ChatMsg } from './llm'
+import { supabase } from './supabase'
+import { isFreeLlmConfigured, type ChatMsg } from './llm'
 
 export type { ChatMsg } from './llm'
 export type AiProvider = 'universal' | 'freellm'
@@ -28,8 +29,9 @@ export function getActiveProvider(): AiProvider | null {
     return null
 }
 
+/** A chave de IA fica no servidor (segredos do Supabase); o browser só precisa da sessão. */
 export function isAiReady(): boolean {
-    return getActiveProvider() !== null
+    return true
 }
 
 export function getProviderLabel(): string {
@@ -44,12 +46,20 @@ export function getProviderLabel(): string {
 }
 
 /** Conversa completa (com histórico) através do melhor fornecedor disponível. */
-export async function chatAI(messages: ChatMsg[], o: AiOptions = {}): Promise<AiResult> {
-    const provider = getActiveProvider()
-    if (!provider) throw new Error('Nenhuma chave de IA configurada. Adicione a chave Universal em Administração → Integrações.')
-    
-    const r = await llmChat({ messages, model: o.model, temperature: o.temperature, maxTokens: o.maxTokens })
-    return { text: r.text, provider, model: r.model ?? o.model ?? 'auto', routedVia: r.routedVia, inputTokens: r.inputTokens, outputTokens: r.outputTokens }
+/** Todas as chamadas de IA passam pelo agente no servidor (Edge Function mkon-agent). */
+export async function chatAI(messages: ChatMsg[], _o: AiOptions = {}): Promise<AiResult> {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
+    const url = import.meta.env.VITE_SUPABASE_URL as string
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+    const res = await fetch(`${url}/functions/v1/mkon-agent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: anonKey },
+        body: JSON.stringify({ messages: messages.map((m) => ({ role: m.role, content: m.content })) }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data?.error ?? `O agente devolveu erro ${res.status}.`)
+    return { text: String(data.reply ?? ''), provider: 'universal', model: 'mkon-agent', routedVia: 'mkon-agent', inputTokens: 0, outputTokens: 0 }
 }
 
 /** Pergunta única (sistema + utilizador) → texto. */
