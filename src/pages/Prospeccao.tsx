@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { Building2, Plus, Radar, Search, Sparkles, TrendingUp, Globe, Phone, MapPin, Tag, Bot, Loader2, Copy, Pencil, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { logActivity } from '@/lib/log'
@@ -95,6 +98,9 @@ export default function Prospeccao() {
                     </Card>
                 ))}
             </div>
+
+            {/* Mapa: pesquisa de empresas por região e criação de propostas */}
+            <MapSearch onDone={load} />
 
             {/* Filtros */}
             <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -426,5 +432,179 @@ function AddLeadModal({ company, onClose, onCreated }: { company: Company | null
                 <Field label="Valor estimado (€)" hint="Opcional — pode ajustar depois no CRM."><input className="input" type="number" min="0" step="0.01" value={value} onChange={e => setValue(e.target.value)} /></Field>
             </form>
         </Modal>
+    )
+}
+
+/* ── Mapa: pesquisa por região e criação de propostas para empresas sem website ── */
+type MapPlace = {
+    id: string; name: string; address: string | null; phone: string | null; website: string | null
+    rating: number | null; reviews: number; type: string | null; lat: number | null; lng: number | null
+    mapsUrl: string | null; score: number | null; opportunity: string | null; company_id: string | null
+}
+
+const PT_CENTER: [number, number] = [39.6, -8.0]
+
+function MapSearch({ onDone }: { onDone: () => void }) {
+    const toast = useToast()
+    const navigate = useNavigate()
+    const [query, setQuery] = useState('')
+    const [busy, setBusy] = useState(false)
+    const [places, setPlaces] = useState<MapPlace[]>([])
+    const [selected, setSelected] = useState<MapPlace | null>(null)
+    const [summary, setSummary] = useState('')
+    const [creating, setCreating] = useState(false)
+    const mapEl = useRef<HTMLDivElement>(null)
+    const mapRef = useRef<L.Map | null>(null)
+    const layerRef = useRef<L.LayerGroup | null>(null)
+    const viewRef = useRef({ lat: PT_CENTER[0], lng: PT_CENTER[1], zoom: 7 })
+
+    useEffect(() => {
+        if (!mapEl.current || mapRef.current) return
+        const map = L.map(mapEl.current, { center: PT_CENTER, zoom: 7, scrollWheelZoom: true })
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap',
+        }).addTo(map)
+        layerRef.current = L.layerGroup().addTo(map)
+        const sync = () => { const c = map.getCenter(); viewRef.current = { lat: c.lat, lng: c.lng, zoom: map.getZoom() } }
+        map.on('moveend', sync)
+        sync()
+        mapRef.current = map
+        return () => { map.remove(); mapRef.current = null }
+    }, [])
+
+    // Desenha os marcadores: laranja = sem website (oportunidade), cinzento = já tem website.
+    useEffect(() => {
+        const layer = layerRef.current
+        if (!layer) return
+        layer.clearLayers()
+        const bounds: L.LatLngTuple[] = []
+        for (const p of places) {
+            if (p.lat == null || p.lng == null) continue
+            const noSite = !p.website
+            const m = L.circleMarker([p.lat, p.lng], {
+                radius: noSite ? 9 : 6,
+                color: noSite ? '#f59e0b' : '#64748b',
+                fillColor: noSite ? '#f59e0b' : '#64748b',
+                fillOpacity: noSite ? 0.85 : 0.5,
+                weight: selected?.id === p.id ? 3 : 1,
+            })
+            m.bindTooltip(p.name)
+            m.on('click', () => setSelected(p))
+            m.addTo(layer)
+            bounds.push([p.lat, p.lng])
+        }
+        if (bounds.length > 0 && mapRef.current) mapRef.current.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 })
+    }, [places, selected])
+
+    const run = async () => {
+        const q = query.trim()
+        if (!q || busy) return
+        setBusy(true); setSummary(''); setSelected(null)
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) throw new Error('Sessão expirada. Inicie sessão novamente.')
+            const v = viewRef.current
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mkon-prospect`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string },
+                body: JSON.stringify({ query: q, lat: v.lat, lng: v.lng, zoom: v.zoom }),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`)
+            setPlaces((data.locais ?? []) as MapPlace[])
+            setSummary(`${data.encontradas} locais · ${data.sem_website} sem website · ${data.novas_empresas} novas empresas · ${data.ja_existiam} já existiam`)
+            toast.push('success', `${data.novas_empresas} novas empresas sem website.`)
+            onDone()
+        } catch (e) {
+            toast.push('error', e instanceof Error ? e.message : 'Falha na pesquisa.')
+        } finally { setBusy(false) }
+    }
+
+    const createProposal = async (p: MapPlace) => {
+        if (!p.company_id) return toast.push('error', 'Pesquise primeiro para registar a empresa.')
+        setCreating(true)
+        try {
+            const { data: lead } = await supabase.from('leads').select('id').eq('company_id', p.company_id).limit(1).maybeSingle()
+            const number = `PROP-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`
+            const { error } = await supabase.from('proposals').insert({
+                number, company_id: p.company_id, lead_id: lead?.id ?? null,
+                title: `Website para ${p.name}`, status: 'rascunho', total: 0,
+            })
+            if (error) throw new Error(error.message)
+            await logActivity('proposal.created', 'proposals', number, { source: 'mapa', company: p.name })
+            toast.push('success', `Proposta ${number} criada como rascunho.`)
+            navigate('/propostas')
+        } catch (e) {
+            toast.push('error', e instanceof Error ? e.message : 'Não foi possível criar a proposta.')
+        } finally { setCreating(false) }
+    }
+
+    const semSite = places.filter((p) => !p.website)
+
+    return (
+        <Card className="mb-4 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[220px]">
+                    <MapPin className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/30" />
+                    <input
+                        className="input pl-9"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') run() }}
+                        placeholder="Tipo de negócio, ex.: canalizadores, pintores, cafés…"
+                        disabled={busy}
+                    />
+                </div>
+                <Button onClick={run} loading={busy} disabled={!query.trim()}>
+                    <Radar className="h-4 w-4" /> Pesquisar nesta área
+                </Button>
+            </div>
+            <p className="mt-2 text-[11px] text-white/35">Mova e aproxime o mapa para escolher a região. Laranja = sem website (oportunidade). Cinzento = já tem website.</p>
+
+            <div ref={mapEl} className="mt-3 h-[360px] w-full overflow-hidden rounded-xl border border-white/[0.08]" />
+
+            {summary && <p className="mt-3 text-xs text-white/60">{summary}</p>}
+
+            {selected && (
+                <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="text-sm font-semibold">{selected.name}</p>
+                            <p className="text-xs text-white/50">{selected.type ?? '—'} · {selected.address ?? 'sem morada'}</p>
+                            <p className="mt-1 text-xs text-white/50">
+                                {selected.phone ? `📞 ${selected.phone} · ` : ''}{selected.rating ? `★ ${selected.rating} (${selected.reviews})` : 'sem avaliações'}
+                            </p>
+                            <p className="mt-1 text-xs">
+                                {selected.website
+                                    ? <span className="text-white/50">Tem website: {selected.website}</span>
+                                    : <span className="text-amber-300">Sem website · pontuação {selected.score ?? '—'} ({selected.opportunity ?? 'n/a'})</span>}
+                            </p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                            {!selected.website && (
+                                <Button size="sm" onClick={() => createProposal(selected)} loading={creating}>
+                                    <Plus className="h-3.5 w-3.5" /> Criar proposta
+                                </Button>
+                            )}
+                            {selected.mapsUrl && (
+                                <a href={selected.mapsUrl} target="_blank" rel="noreferrer" className="btn btn-ghost text-xs">Abrir no Google Maps</a>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {semSite.length > 0 && (
+                <div className="mt-3 divide-y divide-white/[0.05] rounded-xl border border-white/[0.06]">
+                    {semSite.slice(0, 20).map((p) => (
+                        <button key={p.id} onClick={() => { setSelected(p); mapRef.current?.panTo(p.lat != null && p.lng != null ? [p.lat, p.lng] : mapRef.current.getCenter()) }} className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-xs hover:bg-white/[0.03]">
+                            <span className="truncate">{p.name}</span>
+                            <span className="shrink-0 text-white/40">{p.address?.split(',').slice(-2, -1)[0]?.trim() ?? ''} · {p.score ?? '—'}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </Card>
     )
 }
