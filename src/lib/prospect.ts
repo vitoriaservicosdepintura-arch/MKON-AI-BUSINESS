@@ -32,3 +32,14 @@ export async function dismissAllProspects(ids: string[]) {
     const { error } = await supabase.from('companies').update({ prospect_dismissed: true }).in('id', ids)
     if (error) throw new Error(error.message)
 }
+
+/** Limpa da lista todas as empresas vindas da prospecção (não apaga nada do CRM). */
+export async function dismissAllProspectSources(): Promise<number> {
+    const { data: sources, error: sErr } = await supabase.from('lead_sources').select('id').in('code', PROSPECT_SOURCES)
+    if (sErr) throw new Error(sErr.message)
+    const ids = (sources ?? []).map((s) => s.id)
+    if (ids.length === 0) return 0
+    const { data, error } = await supabase.from('companies').update({ prospect_dismissed: true }).in('source_id', ids).eq('prospect_dismissed', false).select('id')
+    if (error) throw new Error(error.message)
+    return data?.length ?? 0
+}

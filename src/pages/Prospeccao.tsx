@@ -12,7 +12,7 @@ import { cn, normalizeWebsite, relativeTime } from '@/lib/utils'
 import { isDemoActive } from '@/lib/demo'
 import { analyzeLeadWithAI, generateProspectingMessage, isAiReady } from '@/lib/ai'
 import { speakNatural } from '@/lib/voice'
-import { loadProspectCompanies, dismissProspect, dismissAllProspects, type ProspectCompany } from '@/lib/prospect'
+import { loadProspectCompanies, dismissProspect, dismissAllProspects, dismissAllProspectSources, type ProspectCompany } from '@/lib/prospect'
 
 type Company = {
     id: string; name: string; category: string | null; city: string | null; region: string | null
@@ -49,6 +49,7 @@ export default function Prospeccao() {
         const { data, error } = await supabase
             .from('companies')
             .select('id, name, category, city, region, phone, email, website, has_website, commercial_profile, identified_at, lead_sources(name), leads(id, stage, score)')
+            .eq('prospect_dismissed', false)
             .order('identified_at', { ascending: false })
             .limit(200)
         if (error) toast.push('error', error.message)
@@ -56,6 +57,19 @@ export default function Prospeccao() {
         setLoading(false)
     }, [demo])
     useEffect(() => { load() }, [load])
+
+    /** Retira da lista as empresas vindas da prospecção. Não apaga nada do CRM. */
+    const clearProspectList = async () => {
+        if (demo) { toast.push('info', 'Modo demo — sem efeito real.'); return }
+        if (!window.confirm('Limpar da lista as empresas encontradas pela prospecção? Continuam no CRM.')) return
+        try {
+            const n = await dismissAllProspectSources()
+            toast.push('success', `${n} empresa(s) retiradas da lista.`)
+            load()
+        } catch (e) {
+            toast.push('error', e instanceof Error ? e.message : 'Não foi possível limpar.')
+        }
+    }
 
     const filtered = useMemo(() => {
         const term = q.trim().toLowerCase()
@@ -121,6 +135,7 @@ export default function Prospeccao() {
                     <Radar className="h-3.5 w-3.5" /> Sem lead
                 </button>
                 <span className="ml-auto text-xs text-white/35">{filtered.length} empresa(s)</span>
+                <Button size="sm" variant="ghost" onClick={clearProspectList}>Limpar prospecção</Button>
             </div>
 
             {/* Lista */}
