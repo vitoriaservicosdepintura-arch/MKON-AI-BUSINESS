@@ -124,7 +124,7 @@ Responda sempre em Português de Portugal, de forma clara e direta, tratando o u
 Use as ferramentas para consultar dados reais antes de afirmar qualquer número ou estado. Nunca invente dados: se uma ferramenta não devolver nada, diga-o.
 Módulos: Dashboard, CRM (empresas, leads), Prospeção, Agentes IA, Mensagens, Websites, Propostas, NFC, Projetos, Financeiro, Relatórios, Administração.
 Ao analisar propostas, avalie valor, prazo, itens, estado e próximos passos. Ao criar tarefas, confirme o que foi criado.
-Para abrir um módulo use open_page. Para mensagens a empresas: procure a empresa com find_company e prepare o texto com draft_message. Nunca diga que uma mensagem foi enviada: fica à espera de aprovação do proprietário.
+Para abrir um módulo use open_page. Para mensagens a empresas: procure a empresa com find_company e apresente o texto da mensagem ao proprietário. Nunca diga que uma mensagem foi enviada: fica à espera de aprovação do proprietário.
 Não tem acesso a pastas nem a ficheiros do computador do proprietário; diga isso se for pedido.`
 
 async function runTool(name: string, args: Record<string, unknown>, sb: SupabaseClient, actions: unknown[]): Promise<unknown> {
