@@ -610,7 +610,7 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             </div>
             <p className="mt-2 text-[11px] text-white/35">Mova e aproxime o mapa para escolher a região. Laranja = sem website (oportunidade). Cinzento = já tem website.</p>
 
-            <div ref={mapEl} className="mt-3 h-[360px] w-full overflow-hidden rounded-xl border border-white/[0.08]" />
+            <div ref={mapEl} className="isolate relative z-0 mt-3 h-[360px] w-full overflow-hidden rounded-xl border border-white/[0.08]" />
             <div className="mt-2 flex items-center justify-between gap-3">
                 <p className="text-[11px] text-white/35">{places.length > 0 ? `${places.length} locais no mapa` : 'Sem resultados no mapa'}</p>
                 <Button size="sm" variant="ghost" onClick={clearMap} disabled={places.length === 0 && steps.length === 0 && prospects.length === 0}>Limpar</Button>
