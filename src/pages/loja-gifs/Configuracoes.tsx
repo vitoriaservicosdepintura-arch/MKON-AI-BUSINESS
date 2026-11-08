@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Save } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Save, Upload } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { logActivity } from '@/lib/log'
 import { Card, CardHeader, Button, Field, Skeleton } from '@/components/ui'
@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/Toast'
 type StoreSettings = {
   store_name: string
   store_description: string
+  logo_url: string
   contact_email: string
   contact_phone: string
   shipping_enabled: boolean
@@ -42,6 +43,7 @@ export default function LojaGifsConfiguracoes() {
       setSettings({
         store_name: settingsMap.name || 'Loja de GIFs',
         store_description: settingsMap.description || '',
+        logo_url: settingsMap.logo_url || '',
         contact_email: settingsMap.email || '',
         contact_phone: settingsMap.phone || '',
         shipping_enabled: settingsMap.shipping_enabled ?? true,
@@ -57,6 +59,30 @@ export default function LojaGifsConfiguracoes() {
     }
   }
 
+  const logoInput = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+
+  /** Envia a logo para o Storage (bucket público loja-logos) e preenche o campo com o endereço. */
+  const uploadLogo = async (file: File | undefined) => {
+    if (!file || !settings) return
+    if (file.size > 2 * 1024 * 1024) { toast.push('error', 'A logo deve ter no máximo 2 MB.'); return }
+    setUploading(true)
+    try {
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const path = `logo-${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('loja-logos').upload(path, file, { contentType: file.type, upsert: false })
+      if (error) throw error
+      const { data } = supabase.storage.from('loja-logos').getPublicUrl(path)
+      setSettings({ ...settings, logo_url: data.publicUrl })
+      toast.push('success', 'Logo enviada. Clique em Guardar para aplicar.')
+    } catch (error: any) {
+      toast.push('error', error.message ?? 'Não foi possível enviar a logo.')
+    } finally {
+      setUploading(false)
+      if (logoInput.current) logoInput.current.value = ''
+    }
+  }
+
   const save = async () => {
     if (!settings) return
     setSaving(true)
@@ -64,6 +90,7 @@ export default function LojaGifsConfiguracoes() {
       const settingsToSave = [
         { key: 'gif_store_name', value: settings.store_name },
         { key: 'gif_store_description', value: settings.store_description },
+        { key: 'gif_store_logo_url', value: settings.logo_url },
         { key: 'gif_store_email', value: settings.contact_email },
         { key: 'gif_store_phone', value: settings.contact_phone },
         { key: 'gif_store_shipping_enabled', value: settings.shipping_enabled },
@@ -108,6 +135,23 @@ export default function LojaGifsConfiguracoes() {
           </Field>
           <Field label="Descrição">
             <textarea className="input" rows={3} value={settings.store_description} onChange={e => setSettings({ ...settings, store_description: e.target.value })} />
+          </Field>
+          <Field label="Logo da empresa" hint="Cole o endereço de uma imagem, ou envie um ficheiro (PNG, JPG, WebP, SVG ou GIF, até 2 MB).">
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <input className="input flex-1 min-w-[220px]" placeholder="https://…/logo.png" value={settings.logo_url} onChange={e => setSettings({ ...settings, logo_url: e.target.value })} />
+                <input ref={logoInput} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif" className="hidden" onChange={e => uploadLogo(e.target.files?.[0])} />
+                <Button type="button" variant="outline" onClick={() => logoInput.current?.click()} loading={uploading}>
+                  <Upload className="h-4 w-4" /> Enviar logo
+                </Button>
+              </div>
+              {settings.logo_url && (
+                <div className="flex items-center gap-3">
+                  <img src={settings.logo_url} alt="Pré-visualização da logo" className="h-14 w-auto max-w-[200px] rounded-lg border border-white/10 bg-white/5 object-contain p-1" />
+                  <button type="button" className="text-xs text-white/50 hover:text-white" onClick={() => setSettings({ ...settings, logo_url: '' })}>Remover logo</button>
+                </div>
+              )}
+            </div>
           </Field>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Email de Contato">
