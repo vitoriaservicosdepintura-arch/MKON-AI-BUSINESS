@@ -30,6 +30,7 @@ import LojaGifsEstoque from '@/pages/loja-gifs/Estoque'
 import LojaGifsFinanceiro from '@/pages/loja-gifs/Financeiro'
 import LojaGifsRelatorios from '@/pages/loja-gifs/Relatorios'
 import LojaGifsConfiguracoes from '@/pages/loja-gifs/Configuracoes'
+import LojaGifsGabaritos from '@/pages/loja-gifs/Gabaritos'
 import { activateApiKeyFromUrl } from '@/lib/apikeys'
 import { UiPrefsProvider } from '@/lib/ui-prefs'
 
@@ -125,6 +126,7 @@ export default function App() {
                 <Route path="estoque" element={<LojaGifsEstoque />} />
                 <Route path="financeiro" element={<LojaGifsFinanceiro />} />
                 <Route path="relatorios" element={<LojaGifsRelatorios />} />
+                <Route path="gabaritos" element={<LojaGifsGabaritos />} />
                 <Route path="configuracoes" element={<LojaGifsConfiguracoes />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
