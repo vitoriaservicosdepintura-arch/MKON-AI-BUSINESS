@@ -19,6 +19,7 @@ type Template = {
   shape: Shape; radius: number
   hole?: Hole                     // furo de chaveiro, coordenadas dentro do corte
   builtin?: boolean
+  emoji?: string
 }
 type Layer = {
   id: string; kind: 'image' | 'text' | 'rect'; name: string
@@ -36,23 +37,24 @@ const MM = 25.4
 const HEART = 'M50 90 C10 60 0 40 0 25 C0 10 12 0 25 0 C38 0 47 10 50 20 C53 10 62 0 75 0 C88 0 100 10 100 25 C100 40 90 60 50 90 Z'
 const FONTS = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'Verdana', 'Trebuchet MS', 'Courier New', 'Impact']
 const GROUPS = ['Ímanes de geladeira', 'Chaveiros', 'Ímanes de calendário']
+const GROUP_EMOJI: Record<string, string> = { [GROUPS[0]]: '🧲', [GROUPS[1]]: '🔑', [GROUPS[2]]: '📅' }
 
 const base = { bleed: 2, safe: 3, dpi: 300 as const, builtin: true }
 /** Formatos iniciais de referência. Confirmar medidas de corte e acabamento com o fornecedor. */
 const BUILTIN: Template[] = [
-  { id: 'iman-90x50', name: 'Retangular 90 × 50 mm', group: GROUPS[0], w: 90, h: 50, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-85x55', name: 'Cartão 85 × 55 mm', group: GROUPS[0], w: 85, h: 55, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-70x50', name: 'Retangular 70 × 50 mm', group: GROUPS[0], w: 70, h: 50, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-100x70', name: 'Retangular grande 100 × 70 mm', group: GROUPS[0], w: 100, h: 70, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-circ-58', name: 'Circular 58 mm', group: GROUPS[0], w: 58, h: 58, shape: 'circle', radius: 0, ...base },
-  { id: 'iman-circ-75', name: 'Circular 75 mm', group: GROUPS[0], w: 75, h: 75, shape: 'circle', radius: 0, ...base },
-  { id: 'iman-coracao-70', name: 'Coração 70 mm', group: GROUPS[0], w: 70, h: 70, shape: 'heart', radius: 0, ...base },
-  { id: 'chav-ret-50x70', name: 'Acrílico retangular 50 × 70 mm', group: GROUPS[1], w: 50, h: 70, shape: 'rounded', radius: 4, hole: { x: 25, y: 6, d: 4 }, ...base },
-  { id: 'chav-circ-50', name: 'Acrílico circular 50 mm', group: GROUPS[1], w: 50, h: 50, shape: 'circle', radius: 0, hole: { x: 25, y: 6, d: 4 }, ...base },
-  { id: 'chav-coracao-60', name: 'Acrílico coração 60 mm', group: GROUPS[1], w: 60, h: 60, shape: 'heart', radius: 0, hole: { x: 30, y: 8, d: 4 }, ...base },
-  { id: 'cal-a4', name: 'Calendário de ímã A4 (210 × 297 mm)', group: GROUPS[2], w: 210, h: 297, shape: 'rect', radius: 0, ...base },
-  { id: 'cal-a5', name: 'Calendário de ímã A5 (148 × 210 mm)', group: GROUPS[2], w: 148, h: 210, shape: 'rect', radius: 0, ...base },
-  { id: 'cal-mini', name: 'Mini calendário 90 × 120 mm', group: GROUPS[2], w: 90, h: 120, shape: 'rounded', radius: 3, ...base },
+  { id: 'iman-90x50', emoji: '🏷️', name: 'Retangular 90 × 50 mm', group: GROUPS[0], w: 90, h: 50, shape: 'rounded', radius: 3, ...base },
+  { id: 'iman-85x55', emoji: '💳', name: 'Cartão 85 × 55 mm', group: GROUPS[0], w: 85, h: 55, shape: 'rounded', radius: 3, ...base },
+  { id: 'iman-70x50', emoji: '🟩', name: 'Retangular 70 × 50 mm', group: GROUPS[0], w: 70, h: 50, shape: 'rounded', radius: 3, ...base },
+  { id: 'iman-100x70', emoji: '🖼️', name: 'Retangular grande 100 × 70 mm', group: GROUPS[0], w: 100, h: 70, shape: 'rounded', radius: 3, ...base },
+  { id: 'iman-circ-58', emoji: '⭕', name: 'Circular 58 mm', group: GROUPS[0], w: 58, h: 58, shape: 'circle', radius: 0, ...base },
+  { id: 'iman-circ-75', emoji: '🔵', name: 'Circular 75 mm', group: GROUPS[0], w: 75, h: 75, shape: 'circle', radius: 0, ...base },
+  { id: 'iman-coracao-70', emoji: '❤️', name: 'Coração 70 mm', group: GROUPS[0], w: 70, h: 70, shape: 'heart', radius: 0, ...base },
+  { id: 'chav-ret-50x70', emoji: '🔑', name: 'Acrílico retangular 50 × 70 mm', group: GROUPS[1], w: 50, h: 70, shape: 'rounded', radius: 4, hole: { x: 25, y: 6, d: 4 }, ...base },
+  { id: 'chav-circ-50', emoji: '🔘', name: 'Acrílico circular 50 mm', group: GROUPS[1], w: 50, h: 50, shape: 'circle', radius: 0, hole: { x: 25, y: 6, d: 4 }, ...base },
+  { id: 'chav-coracao-60', emoji: '💖', name: 'Acrílico coração 60 mm', group: GROUPS[1], w: 60, h: 60, shape: 'heart', radius: 0, hole: { x: 30, y: 8, d: 4 }, ...base },
+  { id: 'cal-a4', emoji: '📅', name: 'Calendário de ímã A4 (210 × 297 mm)', group: GROUPS[2], w: 210, h: 297, shape: 'rect', radius: 0, ...base },
+  { id: 'cal-a5', emoji: '🗓️', name: 'Calendário de ímã A5 (148 × 210 mm)', group: GROUPS[2], w: 148, h: 210, shape: 'rect', radius: 0, ...base },
+  { id: 'cal-mini', emoji: '📆', name: 'Mini calendário 90 × 120 mm', group: GROUPS[2], w: 90, h: 120, shape: 'rounded', radius: 3, ...base },
 ]
 
 /* ------------------------------------------------------------------ */
@@ -267,8 +269,9 @@ function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }:
           : <Button onClick={() => finish(onSaveLibrary)}>Guardar na biblioteca</Button>}
       </>}>
       <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Nome"><input className="input" value={d.name} onChange={e => setD({ ...d, name: e.target.value })} /></Field>
+          <Field label="Emoji"><input className="input" maxLength={4} value={d.emoji ?? ''} onChange={e => setD({ ...d, emoji: e.target.value })} /></Field>
           <Field label="Grupo">
             <select className="input" value={d.group} onChange={e => setD({ ...d, group: e.target.value })}>
               {GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
@@ -361,7 +364,7 @@ export default function Gabaritos() {
     return () => ro.disconnect()
   }, [editorOpen])
 
-  const fitPpm = dim ? Math.min((area.w - 120) / dim.W, (area.h - 120) / dim.H) : 1
+  const fitPpm = dim ? Math.min((area.w - 80) / dim.W, (area.h - 130) / dim.H) : 1
   const ppm = Math.max(0.5, fitPpm * zoom)
 
   /* Persistência local (debounce) */
@@ -642,8 +645,9 @@ export default function Gabaritos() {
   const editor = editorOpen && project && t && dim ? (
     <div className="fixed inset-0 z-40 flex flex-col bg-[#0b1020] text-white">
       {/* Barra superior */}
-      <header className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#0f1628] px-3 py-2">
+      <header className="flex h-14 shrink-0 items-center gap-2 overflow-x-auto border-b border-white/10 bg-[#0f1628] px-3">
         <button className={btn} onClick={closeEditor}><ArrowLeft className="h-4 w-4" /> Voltar às artes</button>
+        <span className="text-lg" aria-hidden>{t.emoji ?? '🖼️'}</span>
         <input className="input h-8 w-64 max-w-[40vw]" value={project.name} aria-label="Nome da arte"
           onChange={e => patchProject(p => ({ ...p, name: e.target.value }))} />
         <button className={btn} onClick={() => setTplMode('project')}><Ruler className="h-4 w-4" /> Medidas</button>
@@ -729,7 +733,7 @@ export default function Gabaritos() {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           onWheel={onWheel}>
-          <div className="flex min-h-full min-w-full items-center justify-center p-16"
+          <div className="flex min-h-full min-w-full items-center justify-center p-10"
             onPointerDown={() => setSelId(null)}>
             <div className="relative">
               <div className={cn('relative bg-white shadow-2xl transition-shadow', dragOver && 'ring-4 ring-brand/60')}
@@ -867,7 +871,7 @@ export default function Gabaritos() {
               {store.projects.map(p => (
                 <div key={p.id} className="flex flex-col rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-brand/40">
                   <button className="min-w-0 text-left" onClick={() => openProject(p.id)}>
-                    <p className="truncate text-sm font-medium">{p.name}</p>
+                    <p className="truncate text-sm font-medium"><span className="mr-1.5">{p.template.emoji ?? '🖼️'}</span>{p.name}</p>
                     <p className="mt-1 text-[11px] text-white/40">{p.template.w}×{p.template.h} mm · {p.layers.length} camadas · {dateTime(p.updated)}</p>
                   </button>
                   <div className="mt-3 flex gap-2">
@@ -892,12 +896,12 @@ export default function Gabaritos() {
         <div className="space-y-5">
           {GROUPS.map(g => (
             <div key={g}>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/40">{g}</p>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/40">{GROUP_EMOJI[g]} {g}</p>
               <div className="grid gap-2 sm:grid-cols-2">
                 {library.filter(x => x.group === g).map(tpl => (
                   <div key={tpl.id} className="flex items-center gap-2 rounded-lg border border-white/10 p-3 hover:border-brand/40">
                     <button className="min-w-0 flex-1 text-left" onClick={() => createProject(tpl)}>
-                      <p className="truncate text-sm">{tpl.name}</p>
+                      <p className="truncate text-sm"><span className="mr-2 text-lg">{tpl.emoji ?? '🖼️'}</span>{tpl.name}</p>
                       <p className="text-[11px] text-white/40">{tpl.w}×{tpl.h} mm · sangria {tpl.bleed} mm · {tpl.dpi} DPI{tpl.hole ? ' · furo' : ''}</p>
                     </button>
                     <button title="Copiar e editar" className="p-1 text-white/40 hover:text-white"
