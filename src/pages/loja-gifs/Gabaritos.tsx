@@ -718,9 +718,9 @@ async function exportFile(p: Project, o: ExportOpts, fmt: Fmt, base: string) {
 
 /* ---------- Folha de imagens: várias fotos em colunas e linhas ---------- */
 
-type PhotoOpts = { dpi: number; pw: number; ph: number; cw: number; ch: number; margin: number; gap: number; fill: boolean; marks: boolean }
+type PhotoOpts = { dpi: number; pw: number; ph: number; cw: number; ch: number; margin: number; gap: number; fill: boolean; marks: boolean; circle?: boolean }
 
-const CELL_PRESETS = [
+const CELL_PRESETS: { id: string; label: string; w: number; h: number; circle?: boolean }[] = [
   { id: '90x50', label: 'Ímã 90 × 50 mm', w: 90, h: 50 },
   { id: '85x55', label: 'Cartão 85 × 55 mm', w: 85, h: 55 },
   { id: '70x50', label: 'Ímã 70 × 50 mm', w: 70, h: 50 },
@@ -729,6 +729,10 @@ const CELL_PRESETS = [
   { id: '90x120', label: 'Mini calendário 90 × 120 mm', w: 90, h: 120 },
   { id: '148x210', label: 'Calendário A5 148 × 210 mm', w: 148, h: 210 },
   { id: '10x15', label: 'Foto 10 × 15 cm', w: 100, h: 150 },
+  { id: 'molde-25', label: 'Molde redondo 25 mm', w: 25, h: 25, circle: true },
+  { id: 'molde-32', label: 'Molde redondo 32 mm', w: 32, h: 32, circle: true },
+  { id: 'molde-44', label: 'Molde redondo 44 mm', w: 44, h: 44, circle: true },
+  { id: 'molde-58', label: 'Molde redondo 58 mm', w: 58, h: 58, circle: true },
   { id: 'custom', label: 'Medida personalizada', w: 0, h: 0 },
 ]
 
@@ -785,7 +789,8 @@ function buildPhotoSheet(imgs: HTMLImageElement[], o: PhotoOpts) {
       ctx.save()
       ctx.setTransform(k, 0, 0, k, 0, 0)
       ctx.beginPath()
-      ctx.rect(x, y, cw, ch)
+      if (o.circle) ctx.arc(x + cw / 2, y + ch / 2, Math.min(cw, ch) / 2, 0, Math.PI * 2)
+      else ctx.rect(x, y, cw, ch)
       ctx.clip()
       ctx.drawImage(img, x + (cw - dw) / 2, y + (ch - dh) / 2, dw, dh)
       ctx.restore()
@@ -845,7 +850,7 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
   const cell = cellId === 'custom' ? { w: cellW, h: cellH } : { w: cellPreset.w, h: cellPreset.h }
   const fmtInfo = FORMATS.find(f => f.id === fmt) ?? FORMATS[0]
 
-  const photoOptsFor = (dpi: number): PhotoOpts => ({ dpi, pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap, fill, marks })
+  const photoOptsFor = (dpi: number): PhotoOpts => ({ dpi, pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap, fill, marks, circle: !!cellPreset.circle })
   const grid = kind === 'photos'
     ? photoGrid({ pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap })
     : gridCount(t, withBleed, paper.w, paper.h, margin, gap)
