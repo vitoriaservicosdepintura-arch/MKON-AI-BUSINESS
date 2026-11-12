@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Tag, Package, Edit3, ShoppingCart, Users, Percent, Warehouse, Euro, BarChart3, Settings } from 'lucide-react'
+import { LayoutDashboard, Tag, Package, Edit3, ShoppingCart, Users, Percent, Warehouse, Euro, BarChart3, Settings, LayoutTemplate } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const STORE_NAV = [
@@ -8,6 +8,7 @@ const STORE_NAV = [
   { to: '/loja-gifs/categorias', label: 'Categorias', icon: Tag },
   { to: '/loja-gifs/produtos', label: 'Produtos', icon: Package },
   { to: '/loja-gifs/personalizacoes', label: 'Personalizações', icon: Edit3 },
+  { to: '/loja-gifs/gabaritos', label: 'Editor de Gabaritos', icon: LayoutTemplate },
   { to: '/loja-gifs/pedidos', label: 'Pedidos', icon: ShoppingCart },
   { to: '/loja-gifs/clientes', label: 'Clientes', icon: Users },
   { to: '/loja-gifs/promocoes', label: 'Promoções', icon: Percent },
