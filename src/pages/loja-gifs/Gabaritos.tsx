@@ -48,21 +48,12 @@ const FRAME_FORMATS: FrameFormat[] = [
 
 const base = { bleed: 2, safe: 3, dpi: 300 as const, builtin: true }
 /** Formatos iniciais de referência. Confirmar medidas de corte e acabamento com o fornecedor. */
-const BUILTIN: Template[] = [
-  { id: 'iman-90x50', emoji: '🏷️', name: 'Retangular 90 × 50 mm', group: GROUPS[0], w: 90, h: 50, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-85x55', emoji: '💳', name: 'Cartão 85 × 55 mm', group: GROUPS[0], w: 85, h: 55, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-70x50', emoji: '🟩', name: 'Retangular 70 × 50 mm', group: GROUPS[0], w: 70, h: 50, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-100x70', emoji: '🖼️', name: 'Retangular grande 100 × 70 mm', group: GROUPS[0], w: 100, h: 70, shape: 'rounded', radius: 3, ...base },
-  { id: 'iman-circ-58', emoji: '⭕', name: 'Circular 58 mm', group: GROUPS[0], w: 58, h: 58, shape: 'circle', radius: 0, ...base },
-  { id: 'iman-circ-75', emoji: '🔵', name: 'Circular 75 mm', group: GROUPS[0], w: 75, h: 75, shape: 'circle', radius: 0, ...base },
-  { id: 'iman-coracao-70', emoji: '❤️', name: 'Coração 70 mm', group: GROUPS[0], w: 70, h: 70, shape: 'heart', radius: 0, ...base },
-  { id: 'chav-ret-50x70', emoji: '🔑', name: 'Acrílico retangular 50 × 70 mm', group: GROUPS[1], w: 50, h: 70, shape: 'rounded', radius: 4, hole: { x: 25, y: 6, d: 4 }, ...base },
-  { id: 'chav-circ-50', emoji: '🔘', name: 'Acrílico circular 50 mm', group: GROUPS[1], w: 50, h: 50, shape: 'circle', radius: 0, hole: { x: 25, y: 6, d: 4 }, ...base },
-  { id: 'chav-coracao-60', emoji: '💖', name: 'Acrílico coração 60 mm', group: GROUPS[1], w: 60, h: 60, shape: 'heart', radius: 0, hole: { x: 30, y: 8, d: 4 }, ...base },
-  { id: 'cal-a4', emoji: '📅', name: 'Calendário de ímã A4 (210 × 297 mm)', group: GROUPS[2], w: 210, h: 297, shape: 'rect', radius: 0, ...base },
-  { id: 'cal-a5', emoji: '🗓️', name: 'Calendário de ímã A5 (148 × 210 mm)', group: GROUPS[2], w: 148, h: 210, shape: 'rect', radius: 0, ...base },
-  { id: 'cal-mini', emoji: '📆', name: 'Mini calendário 90 × 120 mm', group: GROUPS[2], w: 90, h: 120, shape: 'rounded', radius: 3, ...base },
-]
+const EMOJI_BY_GROUP: Record<string, string> = { [GROUPS[0]]: '🧲', [GROUPS[1]]: '🔑', [GROUPS[2]]: '📅' }
+const SLUG_BY_GROUP: Record<string, string> = { [GROUPS[0]]: 'iman-geladeira', [GROUPS[1]]: 'chaveiro', [GROUPS[2]]: 'iman-calendario' }
+const BUILTIN: Template[] = GROUPS.flatMap(g => FRAME_FORMATS.map(f => ({
+  id: `${SLUG_BY_GROUP[g]}-${f.id}`, name: f.label, group: g, emoji: EMOJI_BY_GROUP[g],
+  w: f.w, h: f.h, shape: f.shape, radius: 0, ...base,
+})))
 
 /* ------------------------------------------------------------------ */
 /* Utilitários                                                         */
@@ -724,16 +715,8 @@ async function exportFile(p: Project, o: ExportOpts, fmt: Fmt, base: string) {
 type PhotoOpts = { dpi: number; pw: number; ph: number; cw: number; ch: number; margin: number; gap: number; fill: boolean; marks: boolean; circle?: boolean }
 
 const CELL_PRESETS: { id: string; label: string; w: number; h: number; circle?: boolean }[] = [
-  { id: '90x50', label: 'Ímã 90 × 50 mm', w: 90, h: 50 },
-  { id: '85x55', label: 'Cartão 85 × 55 mm', w: 85, h: 55 },
-  { id: '70x50', label: 'Ímã 70 × 50 mm', w: 70, h: 50 },
-  { id: '100x70', label: 'Ímã grande 100 × 70 mm', w: 100, h: 70 },
-  { id: '50x70', label: 'Chaveiro 50 × 70 mm', w: 50, h: 70 },
-  { id: '90x120', label: 'Mini calendário 90 × 120 mm', w: 90, h: 120 },
-  { id: '148x210', label: 'Calendário A5 148 × 210 mm', w: 148, h: 210 },
-  { id: '10x15', label: 'Foto 10 × 15 cm', w: 100, h: 150 },
-  { id: 'molde-58', label: 'Molde redondo 58 mm', w: 58, h: 58, circle: true },
-  { id: 'molde-60', label: 'Molde quadrado 60 mm', w: 60, h: 60 },
+  { id: 'molde-58', label: 'Redondo 58 mm', w: 58, h: 58, circle: true },
+  { id: 'molde-60', label: 'Quadrado 60 mm', w: 60, h: 60 },
   { id: 'custom', label: 'Medida personalizada', w: 0, h: 0 },
 ]
 
