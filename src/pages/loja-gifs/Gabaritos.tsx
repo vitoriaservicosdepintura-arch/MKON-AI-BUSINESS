@@ -615,27 +615,128 @@ function blobOf(u: Uint8Array, opts: BlobPropertyBag) {
   return new Blob([new Uint8Array(u)], opts)
 }
 
-/** Gera o ficheiro no formato escolhido e descarrega-o. */
-async function exportFile(p: Project, o: ExportOpts, fmt: Fmt, base: string) {
-  const { canvas, pageW, pageH } = await buildCanvas(p, o)
+/** Gera o ficheiro a partir de uma imagem já montada. */
+async function exportCanvas(canvas: HTMLCanvasElement, pageW: number, pageH: number, fmt: Fmt, base: string) {
   if (fmt === 'png') return download(await canvasBlob(canvas, 'image/png'), `${base}.png`)
   if (fmt === 'jpg') return download(await canvasBlob(canvas, 'image/jpeg', 0.95), `${base}.jpg`)
   const jpeg = new Uint8Array(await (await canvasBlob(canvas, 'image/jpeg', 0.95)).arrayBuffer())
   if (fmt === 'pdf') {
-    return download(blobOf(buildPdf(jpeg, canvas.width, canvas.height, pageW, pageH) , { type: 'application/pdf' }), `${base}.pdf`)
+    return download(blobOf(buildPdf(jpeg, canvas.width, canvas.height, pageW, pageH), { type: 'application/pdf' }), `${base}.pdf`)
   }
   if (fmt === 'docx') {
-    return download(blobOf(buildDocx(jpeg, pageW, pageH) , { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), `${base}.docx`)
+    return download(blobOf(buildDocx(jpeg, pageW, pageH), { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), `${base}.docx`)
   }
-  return download(blobOf(buildXlsx(jpeg, pageW, pageH, base) , { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${base}.xlsx`)
+  return download(blobOf(buildXlsx(jpeg, pageW, pageH, base), { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${base}.xlsx`)
+}
+
+/** Gera o ficheiro no formato escolhido e descarrega-o. */
+async function exportFile(p: Project, o: ExportOpts, fmt: Fmt, base: string) {
+  const { canvas, pageW, pageH } = await buildCanvas(p, o)
+  return exportCanvas(canvas, pageW, pageH, fmt, base)
+}
+
+/* ---------- Folha de imagens: várias fotos em colunas e linhas ---------- */
+
+type PhotoOpts = { dpi: number; pw: number; ph: number; cw: number; ch: number; margin: number; gap: number; fill: boolean; marks: boolean }
+
+const CELL_PRESETS = [
+  { id: '90x50', label: 'Ímã 90 × 50 mm', w: 90, h: 50 },
+  { id: '85x55', label: 'Cartão 85 × 55 mm', w: 85, h: 55 },
+  { id: '70x50', label: 'Ímã 70 × 50 mm', w: 70, h: 50 },
+  { id: '100x70', label: 'Ímã grande 100 × 70 mm', w: 100, h: 70 },
+  { id: '50x70', label: 'Chaveiro 50 × 70 mm', w: 50, h: 70 },
+  { id: '90x120', label: 'Mini calendário 90 × 120 mm', w: 90, h: 120 },
+  { id: '148x210', label: 'Calendário A5 148 × 210 mm', w: 148, h: 210 },
+  { id: '10x15', label: 'Foto 10 × 15 cm', w: 100, h: 150 },
+  { id: 'custom', label: 'Medida personalizada', w: 0, h: 0 },
+]
+
+/** Quantas colunas e linhas cabem, com a medida escolhida. */
+function photoGrid(o: { pw: number; ph: number; cw: number; ch: number; margin: number; gap: number }) {
+  const cols = Math.max(0, Math.floor((o.pw - 2 * o.margin + o.gap) / (o.cw + o.gap)))
+  const rows = Math.max(0, Math.floor((o.ph - 2 * o.margin + o.gap) / (o.ch + o.gap)))
+  return { cols, rows }
+}
+
+/**
+ * Preenche a folha com as imagens, linha a linha. Se houver menos imagens do que peças,
+ * as imagens repetem-se. Com "preencher a folha", o espaço entre peças é distribuído
+ * para que o conjunto ocupe toda a área útil (margem a margem).
+ */
+function buildPhotoSheet(imgs: HTMLImageElement[], o: PhotoOpts) {
+  const { cols, rows } = photoGrid(o)
+  if (imgs.length === 0) throw new Error('Selecione pelo menos uma imagem.')
+  if (cols < 1 || rows < 1) throw new Error('A peça não cabe neste papel. Escolha um papel maior, uma medida menor ou reduza a margem.')
+  const { pw, ph, cw, ch, margin, gap } = o
+  let gx = gap
+  let gy = gap
+  if (o.fill) {
+    if (cols > 1) gx = (pw - 2 * margin - cols * cw) / (cols - 1)
+    if (rows > 1) gy = (ph - 2 * margin - rows * ch) / (rows - 1)
+  }
+  const gridW = cols * cw + (cols - 1) * gx
+  const gridH = rows * ch + (rows - 1) * gy
+  const x0 = o.fill ? margin + (cols === 1 ? (pw - 2 * margin - cw) / 2 : 0) : (pw - gridW) / 2
+  const y0 = o.fill ? margin + (rows === 1 ? (ph - 2 * margin - ch) / 2 : 0) : (ph - gridH) / 2
+
+  const k = o.dpi / MM
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(pw * k)
+  canvas.height = Math.round(ph * k)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas indisponível neste navegador.')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  const cells: [number, number][] = []
+  let i = 0
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = x0 + c * (cw + gx)
+      const y = y0 + r * (ch + gy)
+      cells.push([x, y])
+      const img = imgs[i % imgs.length]
+      i++
+      // Preenchimento a cobrir a peça (recorte centrado), sem deixar vazios.
+      const s = Math.max(cw / img.naturalWidth, ch / img.naturalHeight)
+      const dw = img.naturalWidth * s
+      const dh = img.naturalHeight * s
+      ctx.save()
+      ctx.setTransform(k, 0, 0, k, 0, 0)
+      ctx.beginPath()
+      ctx.rect(x, y, cw, ch)
+      ctx.clip()
+      ctx.drawImage(img, x + (cw - dw) / 2, y + (ch - dh) / 2, dw, dh)
+      ctx.restore()
+    }
+  }
+  if (o.marks) {
+    ctx.save()
+    ctx.setTransform(k, 0, 0, k, 0, 0)
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth = 0.1
+    const s = 1
+    const L = 3
+    for (const [x, y] of cells) {
+      const corners: [number, number, number, number][] = [[x, y, -1, -1], [x + cw, y, 1, -1], [x, y + ch, -1, 1], [x + cw, y + ch, 1, 1]]
+      for (const [cx, cy, sx, sy] of corners) {
+        ctx.beginPath(); ctx.moveTo(cx + sx * s, cy); ctx.lineTo(cx + sx * (s + L), cy); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(cx, cy + sy * s); ctx.lineTo(cx, cy + sy * (s + L)); ctx.stroke()
+      }
+    }
+    ctx.restore()
+  }
+  return { canvas, pageW: pw, pageH: ph, cols, rows }
 }
 
 /* ---------- Janela de exportação com pré-visualização ---------- */
 
+type PhotoItem = { id: string; url: string; name: string }
+
 function ExportOverlay({ project, onClose }: { project: Project; onClose: () => void }) {
   const toast = useToast()
   const t = project.template
-  const [kind, setKind] = useState<'single' | 'sheet'>('single')
+  const [kind, setKind] = useState<'single' | 'sheet' | 'photos'>('single')
   const [withBleed, setWithBleed] = useState(true)
   const [paperId, setPaperId] = useState('A4')
   const [cw, setCw] = useState(210)
@@ -643,6 +744,14 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
   const [margin, setMargin] = useState(10)
   const [gap, setGap] = useState(8)
   const [marks, setMarks] = useState(true)
+  const [fill, setFill] = useState(true)
+  const [cellId, setCellId] = useState('90x50')
+  const [cellW, setCellW] = useState(90)
+  const [cellH, setCellH] = useState(50)
+  const [photos, setPhotos] = useState<PhotoItem[]>([])
+  const photosRef = useRef<PhotoItem[]>([])
+  photosRef.current = photos
+  const fileRef = useRef<HTMLInputElement>(null)
   const [fmt, setFmt] = useState<Fmt>('pdf')
   const [preview, setPreview] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -651,8 +760,18 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
   const paper = paperId === 'custom'
     ? { id: 'custom', label: `${cw} × ${ch} mm`, w: cw, h: ch }
     : PAPERS.find(x => x.id === paperId) ?? PAPERS[0]
-  const grid = gridCount(t, withBleed, paper.w, paper.h, margin, gap)
+  const cellPreset = CELL_PRESETS.find(c => c.id === cellId) ?? CELL_PRESETS[0]
+  const cell = cellId === 'custom' ? { w: cellW, h: cellH } : { w: cellPreset.w, h: cellPreset.h }
   const fmtInfo = FORMATS.find(f => f.id === fmt) ?? FORMATS[0]
+
+  const photoOptsFor = (dpi: number): PhotoOpts => ({ dpi, pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap, fill, marks })
+  const grid = kind === 'photos'
+    ? photoGrid({ pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap })
+    : gridCount(t, withBleed, paper.w, paper.h, margin, gap)
+  const sheetCount = grid.cols * grid.rows
+
+  // Libera as imagens da memória ao fechar.
+  useEffect(() => () => photosRef.current.forEach(p => URL.revokeObjectURL(p.url)), [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -660,12 +779,34 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const addPhotos = (files: FileList | null) => {
+    if (!files) return
+    const list = Array.from(files).filter(f => f.type.startsWith('image/'))
+    if (list.length === 0) return toast.push('error', 'Escolha imagens (JPG, PNG, WEBP).')
+    setPhotos(p => [...p, ...list.map(f => ({ id: uid(), url: URL.createObjectURL(f), name: f.name }))])
+  }
+  const removePhoto = (id: string) => {
+    const item = photos.find(p => p.id === id)
+    if (item) URL.revokeObjectURL(item.url)
+    setPhotos(p => p.filter(x => x.id !== id))
+  }
+
   // Pré-visualização rápida (96 DPI). O ficheiro final sai na resolução do gabarito.
   useEffect(() => {
     let alive = true
     const timer = setTimeout(async () => {
+      if (kind === 'photos' && photos.length === 0) {
+        if (alive) { setPreview(null); setErr(null) }
+        return
+      }
       try {
-        const { canvas } = await buildCanvas(project, { kind, dpi: 96, withBleed, pw: paper.w, ph: paper.h, margin, gap, marks })
+        let canvas: HTMLCanvasElement
+        if (kind === 'photos') {
+          const imgs = await Promise.all(photos.map(p => loadImg(p.url)))
+          canvas = buildPhotoSheet(imgs, photoOptsFor(96)).canvas
+        } else {
+          canvas = (await buildCanvas(project, { kind, dpi: 96, withBleed, pw: paper.w, ph: paper.h, margin, gap, marks })).canvas
+        }
         if (alive) { setPreview(canvas.toDataURL('image/png')); setErr(null) }
       } catch (e) {
         if (alive) { setErr(e instanceof Error ? e.message : 'Erro na pré-visualização.'); setPreview(null) }
@@ -673,19 +814,32 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
     }, 150)
     return () => { alive = false; clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, kind, withBleed, paperId, cw, ch, margin, gap, marks])
+  }, [project, kind, withBleed, paperId, cw, ch, margin, gap, marks, fill, cellId, cellW, cellH, photos])
 
   const run = async (mode: 'save' | 'print') => {
     setBusy(true)
     try {
-      const o: ExportOpts = { kind, dpi: t.dpi, withBleed, pw: paper.w, ph: paper.h, margin, gap, marks }
-      const base = `${safeName(project.name)}_${kind === 'sheet' ? `folha-${paper.w}x${paper.h}mm` : 'arte'}_${t.dpi}dpi`
-      if (mode === 'print') {
-        const { canvas, pageW, pageH } = await buildCanvas(project, o)
-        printImage(canvas.toDataURL('image/jpeg', 0.95), pageW, pageH)
+      if (kind === 'photos') {
+        if (photos.length === 0) throw new Error('Selecione pelo menos uma imagem.')
+        const imgs = await Promise.all(photos.map(p => loadImg(p.url)))
+        const { canvas, pageW, pageH } = buildPhotoSheet(imgs, photoOptsFor(t.dpi))
+        if (mode === 'print') {
+          printImage(canvas.toDataURL('image/jpeg', 0.95), pageW, pageH)
+        } else {
+          const base = `${safeName(project.name)}_folha-imagens-${paper.w}x${paper.h}mm_${t.dpi}dpi`
+          await exportCanvas(canvas, pageW, pageH, fmt, base)
+          toast.push('success', `Ficheiro ${fmtInfo.label} gerado.`)
+        }
       } else {
-        await exportFile(project, o, fmt, base)
-        toast.push('success', `Ficheiro ${fmtInfo.label} gerado.`)
+        const o: ExportOpts = { kind, dpi: t.dpi, withBleed, pw: paper.w, ph: paper.h, margin, gap, marks }
+        const base = `${safeName(project.name)}_${kind === 'sheet' ? `folha-${paper.w}x${paper.h}mm` : 'arte'}_${t.dpi}dpi`
+        if (mode === 'print') {
+          const { canvas, pageW, pageH } = await buildCanvas(project, o)
+          printImage(canvas.toDataURL('image/jpeg', 0.95), pageW, pageH)
+        } else {
+          await exportFile(project, o, fmt, base)
+          toast.push('success', `Ficheiro ${fmtInfo.label} gerado.`)
+        }
       }
     } catch (e) {
       toast.push('error', e instanceof Error ? e.message : 'Falha na exportação.')
@@ -695,6 +849,30 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
   }
 
   const seg = (on: boolean) => cn('rounded-lg border px-3 py-2 text-left text-xs', on ? 'border-brand/60 bg-brand/15 text-white' : 'border-white/10 text-white/60 hover:text-white')
+  const paperBlock = (
+    <>
+      <Field label="Papel">
+        <select className="input" value={paperId} onChange={e => setPaperId(e.target.value)}>
+          {PAPERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      </Field>
+      {paperId === 'custom' && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Largura (mm)"><input type="number" className="input" value={cw} onChange={e => setCw(Number(e.target.value))} /></Field>
+          <Field label="Altura (mm)"><input type="number" className="input" value={ch} onChange={e => setCh(Number(e.target.value))} /></Field>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Margem (mm)"><input type="number" step="0.5" className="input" value={margin} onChange={e => setMargin(Number(e.target.value))} /></Field>
+        <Field label="Espaço entre peças (mm)"><input type="number" step="0.5" className="input" value={gap} onChange={e => setGap(Number(e.target.value))} /></Field>
+      </div>
+      {kind === 'photos' && (
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={fill} onChange={e => setFill(e.target.checked)} /> Preencher toda a folha (distribui o espaço)</label>
+      )}
+      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} /> Marcas de corte</label>
+      <p className="text-[11px] text-white/40">Para as marcas de corte, use espaço entre peças de pelo menos 6 mm.</p>
+    </>
+  )
 
   return createPortal(
     <div className="fixed inset-0 z-40 flex flex-col bg-[#0b1020] text-white">
@@ -708,45 +886,68 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
       <div className="flex min-h-0 flex-1">
         <aside className="w-80 shrink-0 space-y-5 overflow-y-auto border-r border-white/10 bg-[#0f1628] p-4">
           <section className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">1. O que gerar</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">O que gerar</p>
             <div className="grid grid-cols-1 gap-2">
               <button className={seg(kind === 'single')} onClick={() => setKind('single')}><span className="block font-medium">Arte única</span><span className="text-white/40">Uma peça no tamanho do gabarito</span></button>
-              <button className={seg(kind === 'sheet')} onClick={() => setKind('sheet')}><span className="block font-medium">Folha organizada</span><span className="text-white/40">Várias peças em colunas e linhas</span></button>
+              <button className={seg(kind === 'sheet')} onClick={() => setKind('sheet')}><span className="block font-medium">Folha da arte</span><span className="text-white/40">A mesma arte repetida em colunas e linhas</span></button>
+              <button className={seg(kind === 'photos')} onClick={() => setKind('photos')}><span className="block font-medium">Folha de imagens</span><span className="text-white/40">Várias imagens diferentes, na medida escolhida</span></button>
             </div>
-            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Incluir sangria</label>
-            <p className="text-[11px] text-white/40">Tamanho de cada peça: {grid.cw} × {grid.ch} mm</p>
           </section>
 
-          {kind === 'sheet' && (
+          {kind !== 'photos' && (
+            <section className="space-y-2">
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Incluir sangria</label>
+              <p className="text-[11px] text-white/40">Tamanho de cada peça: {cellSize(t, withBleed).cw} × {cellSize(t, withBleed).ch} mm</p>
+            </section>
+          )}
+
+          {kind === 'photos' && (
             <section className="space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-white/40">2. Papel e organização</p>
-              <Field label="Papel">
-                <select className="input" value={paperId} onChange={e => setPaperId(e.target.value)}>
-                  {PAPERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/40">Medida de cada peça</p>
+              <Field label="Medida">
+                <select className="input" value={cellId} onChange={e => setCellId(e.target.value)}>
+                  {CELL_PRESETS.map(c => <option key={c.id} value={c.id}>{c.label}{c.id !== 'custom' ? ` (${c.w} × ${c.h} mm)` : ''}</option>)}
                 </select>
               </Field>
-              {paperId === 'custom' && (
+              {cellId === 'custom' && (
                 <div className="grid grid-cols-2 gap-2">
-                  <Field label="Largura (mm)"><input type="number" className="input" value={cw} onChange={e => setCw(Number(e.target.value))} /></Field>
-                  <Field label="Altura (mm)"><input type="number" className="input" value={ch} onChange={e => setCh(Number(e.target.value))} /></Field>
+                  <Field label="Largura (mm)"><input type="number" step="0.5" className="input" value={cellW} onChange={e => setCellW(Number(e.target.value))} /></Field>
+                  <Field label="Altura (mm)"><input type="number" step="0.5" className="input" value={cellH} onChange={e => setCellH(Number(e.target.value))} /></Field>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Margem (mm)"><input type="number" step="0.5" className="input" value={margin} onChange={e => setMargin(Number(e.target.value))} /></Field>
-                <Field label="Espaço entre peças (mm)"><input type="number" step="0.5" className="input" value={gap} onChange={e => setGap(Number(e.target.value))} /></Field>
-              </div>
-              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} /> Marcas de corte</label>
-              <p className="text-[11px] text-white/40">Para as marcas de corte, use espaço entre peças de pelo menos 6 mm.</p>
-              <div className={cn('rounded-lg border p-3 text-xs', grid.cols * grid.rows > 0 ? 'border-white/10 text-white/70' : 'border-red-400/30 text-red-200')}>
-                {grid.cols > 0 && grid.rows > 0
-                  ? <>{grid.cols} colunas × {grid.rows} linhas = <strong>{grid.cols * grid.rows} peças</strong> em {paper.label}</>
+
+              <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-white/40">Imagens ({photos.length})</p>
+              <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { addPhotos(e.target.files); e.target.value = '' }} />
+              <Button variant="outline" className="w-full" onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" /> Selecionar imagens</Button>
+              {photos.length > 0 && (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {photos.map(p => (
+                    <div key={p.id} className="group relative">
+                      <img src={p.url} alt={p.name} className="aspect-square w-full rounded object-cover" />
+                      <button title="Remover" onClick={() => removePhoto(p.id)}
+                        className="absolute right-0.5 top-0.5 rounded bg-black/70 px-1 text-[11px] text-white hover:bg-red-500">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-white/40">As imagens são colocadas por ordem, da esquerda para a direita e de cima para baixo. Se houver menos imagens do que peças, repetem-se.</p>
+            </section>
+          )}
+
+          {kind !== 'single' && (
+            <section className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/40">Papel e organização</p>
+              {paperBlock}
+              <div className={cn('rounded-lg border p-3 text-xs', sheetCount > 0 ? 'border-white/10 text-white/70' : 'border-red-400/30 text-red-200')}>
+                {sheetCount > 0
+                  ? <>{grid.cols} colunas × {grid.rows} linhas = <strong>{sheetCount} peças</strong> em {paper.label}{kind === 'photos' && photos.length > 0 ? ` · ${photos.length} imagem(ns)` : ''}</>
                   : 'A peça não cabe neste papel.'}
               </div>
             </section>
           )}
 
           <section className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">{kind === 'sheet' ? '3.' : '2.'} Formato do ficheiro</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">Formato do ficheiro</p>
             <div className="grid grid-cols-2 gap-2">
               {FORMATS.map(f => (
                 <button key={f.id} className={seg(fmt === f.id)} onClick={() => setFmt(f.id)}>
@@ -769,7 +970,7 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
           ) : preview ? (
             <img src={preview} alt="Pré-visualização antes de imprimir ou salvar" className="max-h-[calc(100vh-9rem)] max-w-full object-contain shadow-2xl" />
           ) : (
-            <p className="text-sm text-white/50">A gerar pré-visualização…</p>
+            <p className="text-sm text-white/50">{kind === 'photos' ? 'Selecione as imagens à esquerda para montar a folha.' : 'A gerar pré-visualização…'}</p>
           )}
           <p className="mt-3 text-xs text-white/40">Pré-visualização. O ficheiro sai em {t.dpi} DPI.</p>
         </main>
