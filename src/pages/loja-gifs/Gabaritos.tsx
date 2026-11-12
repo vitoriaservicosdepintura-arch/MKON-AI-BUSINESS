@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent as RPointerEvent, type WheelEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { AlignCenter, AlignCenterVertical, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Frame, ImageIcon, Lock, Maximize, Minus, Plus, Redo2, Ruler, Square, Trash2, Type, Undo2, Unlock, Upload } from 'lucide-react'
 import { Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
@@ -638,7 +639,7 @@ export default function Gabaritos() {
     )
   }
 
-  const btn = 'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent'
+  const btn = 'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent'
 
   /* ---------------- Editor em tela cheia ---------------- */
 
@@ -663,9 +664,9 @@ export default function Gabaritos() {
           {showGuides ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} Guias
         </button>
         <div className="ml-auto flex items-center gap-2">
-          <span className="hidden text-[11px] text-white/40 md:inline">{saved ? 'Guardado neste navegador' : 'Não guardado'}</span>
-          <label className="flex items-center gap-1 text-xs text-white/60"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Com sangria</label>
-          <Button size="sm" onClick={exportPng}><Download className="h-4 w-4" /> Exportar PNG {t.dpi} DPI</Button>
+          <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-white/40 xl:inline">{saved ? 'Guardado neste navegador' : 'Não guardado'}</span>
+          <label className="flex shrink-0 items-center gap-1 whitespace-nowrap text-xs text-white/60"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Com sangria</label>
+          <Button size="sm" className="shrink-0 whitespace-nowrap" onClick={exportPng}><Download className="h-4 w-4" /> PNG {t.dpi} DPI</Button>
         </div>
       </header>
 
@@ -886,7 +887,7 @@ export default function Gabaritos() {
         </>
       )}
 
-      {editor}
+      {editor && createPortal(editor, document.body)}
 
       {/* Escolha de gabarito */}
       <Modal open={pickerOpen} onClose={() => setPickerOpen(false)} title="Escolher gabarito" wide
