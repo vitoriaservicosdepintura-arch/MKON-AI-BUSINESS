@@ -18,6 +18,9 @@ type Props = {
 const POS_KEY = 'mkon.sidebar.pos'
 const DEFAULT_POS = { x: 16, y: 72 }
 const DESKTOP = '(min-width: 1024px)'
+/** Destaque permanente do módulo Loja de GIFs no menu. */
+const LOJA_PATH = '/loja-gifs'
+const LOJA_CLASS = 'bg-gradient-to-r from-amber-400/25 via-pink-500/15 to-transparent text-amber-200 font-semibold ring-1 ring-amber-300/50 shadow-[0_0_18px_rgba(251,191,36,0.28)]'
 
 function readPos(): { x: number; y: number } {
   try {
@@ -135,7 +138,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onCloseMobile, badges
                 className={({ isActive }) =>
                   cn(
                     'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors',
-                    isActive ? 'bg-brand/15 text-brand-soft' : 'text-white/55 hover:bg-white/[0.05] hover:text-snow',
+                    to === LOJA_PATH ? LOJA_CLASS : isActive ? 'bg-brand/15 text-brand-soft' : 'text-white/55 hover:bg-white/[0.05] hover:text-snow',
                   )
                 }
               >
