@@ -23,12 +23,13 @@ type Template = {
   emoji?: string
 }
 type Layer = {
-  id: string; kind: 'image' | 'text' | 'rect'; name: string
+  id: string; kind: 'image' | 'text' | 'rect' | 'frame'; name: string
   x: number; y: number; w: number; h: number   // mm, referencial = canto da área com sangria
   hidden?: boolean; locked?: boolean
   src?: string; srcW?: number; srcH?: number; zoom?: number; offX?: number; offY?: number
   text?: string; font?: string; size?: number; bold?: boolean; align?: 'left' | 'center' | 'right'; color?: string
   fill?: string; radius?: number
+  shape?: Shape; fit?: 'contain' | 'cover'; bg?: string   // quadro de imagem
 }
 type Project = { id: string; name: string; template: Template; layers: Layer[]; updated: string }
 type Store = { custom: Template[]; projects: Project[] }
@@ -90,11 +91,28 @@ function imgRect(l: Layer, iw: number, ih: number) {
   }
 }
 
+/** Foto dentro do quadro: caber sem cortar (padrão) ou preencher e cortar. Nunca deixa vazios nem sai da caixa. */
+function frameRect(l: Layer, iw: number, ih: number) {
+  const base = l.fit === 'cover' ? Math.max(l.w / iw, l.h / ih) : Math.min(l.w / iw, l.h / ih)
+  const s = base * (l.zoom ?? 1)
+  const dw = iw * s
+  const dh = ih * s
+  const lo = (box: number, d: number) => Math.min(0, box - d)
+  const hi = (box: number, d: number) => Math.max(0, box - d)
+  return {
+    s, dw, dh,
+    left: clamp((l.w - dw) / 2 + (l.offX ?? 0) * l.w, lo(l.w, dw), hi(l.w, dw)),
+    top: clamp((l.h - dh) / 2 + (l.offY ?? 0) * l.h, lo(l.h, dh), hi(l.h, dh)),
+  }
+}
+
 /** DPI efetivo de uma imagem na dimensão impressa. */
 function effectiveDpi(l: Layer): number | null {
-  if (l.kind !== 'image' || !l.srcW || !l.srcH) return null
-  const s = Math.max(l.w / l.srcW, l.h / l.srcH) * (l.zoom ?? 1)
-  return Math.round(MM / s)
+  if ((l.kind !== 'image' && l.kind !== 'frame') || !l.srcW || !l.srcH) return null
+  const rw = l.w / l.srcW
+  const rh = l.h / l.srcH
+  const base = l.kind === 'frame' && l.fit !== 'cover' ? Math.min(rw, rh) : Math.max(rw, rh)
+  return Math.round(MM / (base * (l.zoom ?? 1)))
 }
 
 function validateTemplate(d: Template): string | null {
@@ -149,6 +167,21 @@ function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.closePath()
 }
 
+/** Contorno da forma do quadro, em mm (coordenadas do gabarito). */
+function shapePath(shape: Shape, x: number, y: number, w: number, h: number, r: number): Path2D {
+  const p = new Path2D()
+  if (shape === 'circle') { p.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2); return p }
+  if (shape === 'heart') { p.addPath(new Path2D(HEART), new DOMMatrix([w / 100, 0, 0, h / 100, x, y])); return p }
+  const rr = shape === 'rounded' ? Math.min(r, w / 2, h / 2) : 0
+  p.moveTo(x + rr, y)
+  p.arcTo(x + w, y, x + w, y + h, rr)
+  p.arcTo(x + w, y + h, x, y + h, rr)
+  p.arcTo(x, y + h, x, y, rr)
+  p.arcTo(x, y, x + w, y, rr)
+  p.closePath()
+  return p
+}
+
 async function drawLayer(ctx: CanvasRenderingContext2D, l: Layer) {
   if (l.kind === 'rect') {
     ctx.fillStyle = l.fill ?? '#000000'
@@ -166,6 +199,18 @@ async function drawLayer(ctx: CanvasRenderingContext2D, l: Layer) {
     ctx.textAlign = align
     const ax = align === 'center' ? l.x + l.w / 2 : align === 'right' ? l.x + l.w : l.x
     ;(l.text ?? '').split('\n').forEach((line, i) => ctx.fillText(line, ax, l.y + i * size * 1.2))
+    ctx.restore()
+    return
+  }
+  if (l.kind === 'frame') {
+    ctx.save()
+    ctx.clip(shapePath(l.shape ?? 'rect', l.x, l.y, l.w, l.h, l.radius ?? 0))
+    if (l.bg) { ctx.fillStyle = l.bg; ctx.fillRect(l.x, l.y, l.w, l.h) }
+    if (l.src && l.srcW && l.srcH) {
+      const im = await loadImg(l.src)
+      const r = frameRect(l, im.naturalWidth, im.naturalHeight)
+      ctx.drawImage(im, l.x + r.left, l.y + r.top, r.dw, r.dh)
+    }
     ctx.restore()
     return
   }
@@ -209,6 +254,42 @@ function Guides({ t, ppm }: { t: Template; ppm: number }) {
 /* ------------------------------------------------------------------ */
 /* Modal de gabarito (medidas)                                         */
 /* ------------------------------------------------------------------ */
+
+const SHAPE_LABEL: Record<Shape, string> = { rect: 'Retangular', rounded: 'Arredondado', circle: 'Circular', heart: 'Coração' }
+
+/** Forma do quadro em coordenadas locais (mm). */
+function FrameShape({ shape, w, h, r, fill, stroke, strokeWidth, dash }: {
+  shape: Shape; w: number; h: number; r: number; fill?: string; stroke?: string; strokeWidth?: number; dash?: string
+}) {
+  if (shape === 'circle') return <circle cx={w / 2} cy={h / 2} r={Math.min(w, h) / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} />
+  if (shape === 'heart') return <path d={HEART} transform={`scale(${w / 100} ${h / 100})`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} />
+  return <rect width={w} height={h} rx={shape === 'rounded' ? Math.min(r, w / 2, h / 2) : 0} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} />
+}
+
+/** Quadro de imagem: a foto é recortada pela forma e posicionada com frameRect. */
+function FrameView({ l, ppm }: { l: Layer; ppm: number }) {
+  const shape = l.shape ?? 'rect'
+  const r = l.radius ?? 0
+  const clipId = `fr-${l.id}`
+  const fr = l.src && l.srcW && l.srcH ? frameRect(l, l.srcW, l.srcH) : null
+  return (
+    <svg className="pointer-events-none absolute inset-0 overflow-visible" width={l.w * ppm} height={l.h * ppm} viewBox={`0 0 ${l.w} ${l.h}`}>
+      <defs>
+        <clipPath id={clipId}><FrameShape shape={shape} w={l.w} h={l.h} r={r} /></clipPath>
+      </defs>
+      <g clipPath={`url(#${clipId})`}>
+        {l.bg && <rect x={0} y={0} width={l.w} height={l.h} fill={l.bg} />}
+        {fr && l.src && <image href={l.src} x={fr.left} y={fr.top} width={fr.dw} height={fr.dh} preserveAspectRatio="none" />}
+      </g>
+      {!fr && (
+        <>
+          <FrameShape shape={shape} w={l.w} h={l.h} r={r} fill="rgba(148,163,184,0.12)" stroke="#94a3b8" strokeWidth={0.3} dash="1.5 1" />
+          <text x={l.w / 2} y={l.h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(2.5, Math.min(l.w, l.h) / 8)} fill="#94a3b8" fontFamily="Arial">Foto</text>
+        </>
+      )}
+    </svg>
+  )
+}
 
 function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }: {
   open: boolean; mode: 'project' | 'library' | 'new-art'; initial: Template
@@ -1000,11 +1081,13 @@ export default function Gabaritos() {
   const [area, setArea] = useState({ w: 900, h: 600 })
   const [saved, setSaved] = useState(true)
   const [dragOver, setDragOver] = useState(false)
+  const [frameMode, setFrameMode] = useState<'move' | 'image'>('move')   // quadro: mover o quadro ou a foto
+  useEffect(() => { setFrameMode('move') }, [selId])
   const fileRef = useRef<HTMLInputElement>(null)
   const replaceRef = useRef<HTMLInputElement>(null)
   const replaceIdRef = useRef<string | null>(null)
   const areaRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; before: Layer[]; moved: boolean } | null>(null)
+  const dragRef = useRef<{ id: string; mode: 'move' | 'image' | 'resize'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofx: number; ofy: number; before: Layer[]; moved: boolean } | null>(null)
 
   const library = useMemo(() => [...BUILTIN, ...store.custom], [store.custom])
   const project = store.projects.find(p => p.id === currentId) ?? null
@@ -1146,6 +1229,19 @@ export default function Gabaritos() {
     const l: Layer = { id: uid(), kind: 'rect', name: 'Forma', x: dim.W / 2 - 20, y: dim.H / 2 - 12, w: 40, h: 24, fill: '#1d4ed8', radius: 0 }
     setLayers([...project.layers, l]); setSelId(l.id)
   }
+  /** Quadro de imagem com a medida do formato, reduzido se não couber na arte. */
+  const addFrame = (tp: Template) => {
+    if (!project || !dim) return
+    const k = Math.min(1, (dim.W - 8) / tp.w, (dim.H - 8) / tp.h)
+    const w = round2(tp.w * k)
+    const h = round2(tp.h * k)
+    const l: Layer = {
+      id: uid(), kind: 'frame', name: `Quadro ${tp.name}`,
+      x: round2((dim.W - w) / 2), y: round2((dim.H - h) / 2), w, h,
+      shape: tp.shape, radius: tp.radius, fit: 'contain', zoom: 1, offX: 0, offY: 0,
+    }
+    setLayers([...project.layers, l]); setSelId(l.id)
+  }
   const duplicateLayer = (id: string) => {
     if (!project) return
     const idx = project.layers.findIndex(x => x.id === id)
@@ -1207,7 +1303,7 @@ export default function Gabaritos() {
     e.preventDefault()
     setDragOver(false)
     const f = Array.from(e.dataTransfer.files).find(x => x.type.startsWith('image/'))
-    if (f) onImageFile(f)
+    if (f) onImageFile(f, selected?.kind === 'frame' ? selected.id : null)
     else toast.push('error', 'Arraste uma imagem (JPG, PNG, WEBP ou GIF).')
   }
 
@@ -1217,20 +1313,31 @@ export default function Gabaritos() {
     setZoom(z => clamp(z * (e.deltaY < 0 ? 1.1 : 0.9), 0.25, 4))
   }
 
-  /* Arrastar camadas no canvas */
-  const startDrag = (e: RPointerEvent<HTMLDivElement>, l: Layer) => {
+  /* Arrastar: mover a camada, mover a foto dentro do quadro ou ajustar o tamanho do quadro */
+  const startDrag = (e: RPointerEvent<HTMLDivElement>, l: Layer, mode: 'move' | 'image' | 'resize' = 'move') => {
     if (!project || l.locked) return
     e.stopPropagation()
     setSelId(l.id)
-    dragRef.current = { id: l.id, sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, before: project.layers, moved: false }
+    dragRef.current = { id: l.id, mode, sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h, ofx: l.offX ?? 0, ofy: l.offY ?? 0, before: project.layers, moved: false }
+    const r3 = (v: number) => Math.round(v * 1000) / 1000
     const move = (ev: PointerEvent) => {
       const d = dragRef.current
       if (!d) return
       const dx = (ev.clientX - d.sx) / ppm
       const dy = (ev.clientY - d.sy) / ppm
       if (Math.abs(dx) + Math.abs(dy) > 0.05) d.moved = true
-      const nx = round2(d.ox + dx), ny = round2(d.oy + dy)
-      patchProject(p => ({ ...p, layers: p.layers.map(x => (x.id === d.id ? { ...x, x: nx, y: ny } : x)) }))
+      patchProject(p => ({
+        ...p,
+        layers: p.layers.map(x => {
+          if (x.id !== d.id) return x
+          if (d.mode === 'resize') {
+            if (x.shape === 'circle') { const s = round2(Math.max(5, d.ow + dx, d.oh + dy)); return { ...x, w: s, h: s } }
+            return { ...x, w: round2(Math.max(5, d.ow + dx)), h: round2(Math.max(5, d.oh + dy)) }
+          }
+          if (d.mode === 'image') return { ...x, offX: clamp(r3(d.ofx + dx / x.w), -1, 1), offY: clamp(r3(d.ofy + dy / x.h), -1, 1) }
+          return { ...x, x: round2(d.ox + dx), y: round2(d.oy + dy) }
+        }),
+      }))
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
@@ -1250,6 +1357,17 @@ export default function Gabaritos() {
 
   const renderLayer = (l: Layer) => {
     const sel = selId === l.id
+    if (l.kind === 'frame') return (
+      <div key={l.id} onPointerDown={e => startDrag(e, l, frameMode === 'image' && sel ? 'image' : 'move')}
+        className={cn('absolute', l.locked ? 'pointer-events-none' : frameMode === 'image' && sel ? 'cursor-grab' : 'cursor-move', sel && 'outline outline-2 outline-cyan-300')}
+        style={{ left: l.x * ppm, top: l.y * ppm, width: l.w * ppm, height: l.h * ppm, display: l.hidden ? 'none' : undefined }}>
+        <FrameView l={l} ppm={ppm} />
+        {sel && !l.locked && (
+          <div onPointerDown={e => startDrag(e, l, 'resize')} title="Arraste para ajustar o tamanho"
+            className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-sm border-2 border-cyan-300 bg-[#0b1020]" />
+        )}
+      </div>
+    )
     return (
       <div key={l.id} onPointerDown={e => startDrag(e, l)}
         className={cn('absolute', l.locked ? 'pointer-events-none' : 'cursor-move', sel && 'outline outline-2 outline-cyan-300')}
@@ -1276,6 +1394,7 @@ export default function Gabaritos() {
     )
   }
 
+  const toggle = (on: boolean) => cn('rounded-lg border px-2 py-1.5 text-xs', on ? 'border-brand/60 bg-brand/15 text-white' : 'border-white/10 text-white/60 hover:text-white')
   const btn = 'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent'
 
   /* ---------------- Editor em tela cheia ---------------- */
@@ -1327,6 +1446,28 @@ export default function Gabaritos() {
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { onImageFile(e.target.files?.[0]); e.target.value = '' }} />
               <input ref={replaceRef} type="file" accept="image/*" className="hidden"
                 onChange={e => { onImageFile(e.target.files?.[0], replaceIdRef.current); e.target.value = '' }} />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/40">Quadros de imagem</p>
+            <p className="mb-2 text-[11px] text-white/40">A foto cabe inteira no quadro. Depois ajuste o tamanho e a largura.</p>
+            <div className="space-y-3">
+              {GROUPS.map(g => (
+                <div key={g}>
+                  <p className="mb-1.5 text-[11px] text-white/55">{GROUP_EMOJI[g]} {g}</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {BUILTIN.filter(x => x.group === g).map(tp => (
+                      <button key={tp.id} title={tp.name} onClick={() => addFrame(tp)}
+                        className="rounded-lg border border-white/10 p-2 text-left text-[11px] hover:border-brand/50 hover:bg-brand/10">
+                        <span className="block text-sm leading-none">{tp.emoji}</span>
+                        <span className="mt-1 block font-medium">{tp.w} × {tp.h} mm</span>
+                        <span className="block text-white/40">{SHAPE_LABEL[tp.shape]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -1420,6 +1561,60 @@ export default function Gabaritos() {
                 <Field label="Largura (mm)"><input type="number" step="0.5" className="input" value={selected.w} onChange={e => updateLayer(selected.id, { w: Number(e.target.value) })} /></Field>
                 <Field label="Altura (mm)"><input type="number" step="0.5" className="input" value={selected.h} onChange={e => updateLayer(selected.id, { h: Number(e.target.value) })} /></Field>
               </div>
+
+              {selected.kind === 'frame' && (
+                <>
+                  <Field label="Formato do quadro">
+                    <select className="input" value={selected.shape ?? 'rect'} onChange={e => updateLayer(selected.id, { shape: e.target.value as Shape })}>
+                      <option value="rect">Retangular</option>
+                      <option value="rounded">Retangular arredondado</option>
+                      <option value="circle">Circular</option>
+                      <option value="heart">Coração</option>
+                    </select>
+                  </Field>
+                  {selected.shape === 'rounded' && (
+                    <Field label="Raio dos cantos (mm)"><input type="number" step="0.5" min={0} className="input" value={selected.radius ?? 0} onChange={e => updateLayer(selected.id, { radius: Number(e.target.value) })} /></Field>
+                  )}
+
+                  <div>
+                    <p className="mb-1 text-[11px] text-white/40">Foto no quadro</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button className={toggle((selected.fit ?? 'contain') === 'contain')} onClick={() => updateLayer(selected.id, { fit: 'contain' })}>Caber sem cortar</button>
+                      <button className={toggle(selected.fit === 'cover')} onClick={() => updateLayer(selected.id, { fit: 'cover' })}>Preencher e cortar</button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-[11px] text-white/40">Ao arrastar no canvas</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button className={toggle(frameMode === 'move')} onClick={() => setFrameMode('move')}>Mover quadro</button>
+                      <button className={toggle(frameMode === 'image')} onClick={() => setFrameMode('image')}>Mover a foto</button>
+                    </div>
+                    <p className="mt-1 text-[11px] text-white/40">Com "Mover a foto", arraste a imagem dentro do quadro.</p>
+                  </div>
+
+                  <button className={btn + ' w-full justify-center border border-white/10'} onClick={() => { replaceIdRef.current = selected.id; replaceRef.current?.click() }}>
+                    <Upload className="h-3.5 w-3.5" /> {selected.src ? 'Trocar foto' : 'Escolher foto'}
+                  </button>
+                  <Field label={`Zoom da foto (${(selected.zoom ?? 1).toFixed(2)}×)`}>
+                    <input type="range" min={0.5} max={3} step={0.01} className="w-full" value={selected.zoom ?? 1} onChange={e => updateLayer(selected.id, { zoom: Number(e.target.value) })} />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button className={btn + ' justify-center border border-white/10'} onClick={() => updateLayer(selected.id, { offX: 0, offY: 0 })}><AlignCenter className="h-3.5 w-3.5" /> Centrar foto</button>
+                    {selected.shape !== 'circle' && !!selected.srcW && (
+                      <button className={btn + ' justify-center border border-white/10'} onClick={() => { if (selected.srcW && selected.srcH) updateLayer(selected.id, { h: round2(selected.w * selected.srcH / selected.srcW) }) }}>Altura da foto</button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 items-end gap-2">
+                    <Field label="Cor de fundo"><input type="color" className="input h-9 p-1" value={selected.bg ?? '#ffffff'} onChange={e => updateLayer(selected.id, { bg: e.target.value })} /></Field>
+                    <button className={btn + ' h-9 justify-center border border-white/10'} onClick={() => updateLayer(selected.id, { bg: undefined })}>Sem fundo</button>
+                  </div>
+                  <p className={cn('text-xs', (effectiveDpi(selected) ?? 0) < t.dpi ? 'text-amber-300' : 'text-white/50')}>
+                    Resolução efetiva: {effectiveDpi(selected) ?? '—'} DPI {(effectiveDpi(selected) ?? 0) < t.dpi && '· abaixo do recomendado'}
+                  </p>
+                </>
+              )}
 
               {selected.kind === 'image' && (
                 <>
