@@ -778,8 +778,8 @@ function buildPhotoSheet(imgs: HTMLImageElement[], o: PhotoOpts) {
       cells.push([x, y])
       const img = imgs[i % imgs.length]
       i++
-      // Preenchimento a cobrir a peça (recorte centrado), sem deixar vazios.
-      const s = Math.max(cw / img.naturalWidth, ch / img.naturalHeight)
+      // A foto cabe inteira dentro da peça (sem perder nada), centrada.
+      const s = Math.min(cw / img.naturalWidth, ch / img.naturalHeight)
       const dw = img.naturalWidth * s
       const dh = img.naturalHeight * s
       ctx.save()
@@ -1281,7 +1281,11 @@ export default function Gabaritos() {
     try {
       const img = await readImage(file)
       if (replaceId) {
-        updateLayer(replaceId, { src: img.src, srcW: img.w, srcH: img.h, zoom: 1, offX: 0, offY: 0 })
+        const fr = project.layers.find(x => x.id === replaceId)
+        // Quadro retangular: ajusta a altura à foto, mantendo a largura escolhida.
+        const h = fr && fr.kind === 'frame' && fr.shape !== 'circle' ? round2(fr.w * img.h / img.w) : undefined
+        updateLayer(replaceId, { src: img.src, srcW: img.w, srcH: img.h, zoom: 1, offX: 0, offY: 0, fit: 'contain', ...(h !== undefined ? { h } : {}) })
+        setSelId(replaceId)
         return
       }
       const { W, H } = dim
@@ -1303,7 +1307,8 @@ export default function Gabaritos() {
     e.preventDefault()
     setDragOver(false)
     const f = Array.from(e.dataTransfer.files).find(x => x.type.startsWith('image/'))
-    if (f) onImageFile(f, selected?.kind === 'frame' ? selected.id : null)
+    const frameEl = (e.target as HTMLElement).closest('[data-frame-id]') as HTMLElement | null
+    if (f) onImageFile(f, frameEl?.dataset.frameId ?? (selected?.kind === 'frame' ? selected.id : null))
     else toast.push('error', 'Arraste uma imagem (JPG, PNG, WEBP ou GIF).')
   }
 
@@ -1358,7 +1363,7 @@ export default function Gabaritos() {
   const renderLayer = (l: Layer) => {
     const sel = selId === l.id
     if (l.kind === 'frame') return (
-      <div key={l.id} onPointerDown={e => startDrag(e, l, frameMode === 'image' && sel ? 'image' : 'move')}
+      <div key={l.id} data-frame-id={l.id} onPointerDown={e => startDrag(e, l, frameMode === 'image' && sel ? 'image' : 'move')}
         className={cn('absolute', l.locked ? 'pointer-events-none' : frameMode === 'image' && sel ? 'cursor-grab' : 'cursor-move', sel && 'outline outline-2 outline-cyan-300')}
         style={{ left: l.x * ppm, top: l.y * ppm, width: l.w * ppm, height: l.h * ppm, display: l.hidden ? 'none' : undefined }}>
         <FrameView l={l} ppm={ppm} />
