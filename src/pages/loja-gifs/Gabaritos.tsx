@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent as RPointerEvent, type WheelEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { AlignCenter, AlignCenterVertical, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Frame, ImageIcon, Lock, Maximize, Minus, Plus, Redo2, Ruler, Square, Trash2, Type, Undo2, Unlock, Upload } from 'lucide-react'
+import { AlignCenter, AlignCenterVertical, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Frame, ImageIcon, Lock, Maximize, Minus, Plus, Printer, Redo2, Ruler, Square, Trash2, Type, Undo2, Unlock, Upload } from 'lucide-react'
 import { Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 import { cn, dateTime } from '@/lib/utils'
@@ -181,30 +181,6 @@ async function drawLayer(ctx: CanvasRenderingContext2D, l: Layer) {
   }
 }
 
-/** Gera o PNG na dimensão real de impressão (mm × DPI). Unidades do canvas = mm. */
-async function renderPng(p: Project, dpi: number, withBleed: boolean): Promise<Blob> {
-  const t = p.template
-  const { W, H } = dims(t)
-  const off = withBleed ? 0 : t.bleed
-  const cw = withBleed ? W : t.w
-  const ch = withBleed ? H : t.h
-  const k = dpi / MM
-  const c = document.createElement('canvas')
-  c.width = Math.round(cw * k)
-  c.height = Math.round(ch * k)
-  const ctx = c.getContext('2d')
-  if (!ctx) throw new Error('Canvas indisponível neste navegador.')
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, c.width, c.height)
-  ctx.setTransform(k, 0, 0, k, -off * k, -off * k)
-  for (const l of p.layers) {
-    if (l.hidden) continue
-    await drawLayer(ctx, l)
-  }
-  return new Promise((resolve, reject) =>
-    c.toBlob(b => (b ? resolve(b) : reject(new Error('Falha ao gerar o PNG.'))), 'image/png'))
-}
-
 /** Forma de corte em coordenadas do artboard (mm). */
 function ShapeEl({ t, fill, stroke, strokeWidth }: { t: Template; fill?: string; stroke?: string; strokeWidth?: number }) {
   const { bleed: b, w, h } = t
@@ -235,7 +211,7 @@ function Guides({ t, ppm }: { t: Template; ppm: number }) {
 /* ------------------------------------------------------------------ */
 
 function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }: {
-  open: boolean; mode: 'project' | 'library'; initial: Template
+  open: boolean; mode: 'project' | 'library' | 'new-art'; initial: Template
   onClose: () => void; onApply: (t: Template) => void; onSaveLibrary: (t: Template) => void
 }) {
   const toast = useToast()
@@ -262,10 +238,12 @@ function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }:
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={mode === 'project' ? 'Medidas do gabarito desta arte' : 'Gabarito na biblioteca'} wide
+    <Modal open={open} onClose={onClose} title={mode === 'project' ? 'Medidas do gabarito desta arte' : mode === 'new-art' ? 'Nova arte com medidas' : 'Gabarito na biblioteca'} wide
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-        {mode === 'project'
+        {mode === 'new-art'
+          ? <Button onClick={() => finish(onApply)}>Criar arte</Button>
+          : mode === 'project'
           ? <Button onClick={() => finish(onApply)}>Aplicar a esta arte</Button>
           : <Button onClick={() => finish(onSaveLibrary)}>Guardar na biblioteca</Button>}
       </>}>
@@ -324,6 +302,484 @@ function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }:
 }
 
 /* ------------------------------------------------------------------ */
+/* Exportação: PNG, JPG, PDF, Word, Excel, folha e impressão           */
+/* ------------------------------------------------------------------ */
+
+type ExportOpts = { kind: 'single' | 'sheet'; dpi: number; withBleed: boolean; pw: number; ph: number; margin: number; gap: number; marks: boolean }
+type Fmt = 'pdf' | 'png' | 'jpg' | 'docx' | 'xlsx'
+
+const FORMATS: { id: Fmt; label: string; hint: string }[] = [
+  { id: 'pdf', label: 'PDF', hint: 'Para imprimir ou enviar à gráfica' },
+  { id: 'png', label: 'PNG', hint: 'Imagem de alta qualidade' },
+  { id: 'jpg', label: 'JPG', hint: 'Imagem leve para enviar' },
+  { id: 'docx', label: 'Word', hint: 'Documento editável com a arte' },
+  { id: 'xlsx', label: 'Excel', hint: 'Planilha com a arte inserida' },
+]
+const PAPERS = [
+  { id: 'A4', label: 'A4 (210 × 297 mm)', w: 210, h: 297 },
+  { id: 'A3', label: 'A3 (297 × 420 mm)', w: 297, h: 420 },
+  { id: 'A5', label: 'A5 (148 × 210 mm)', w: 148, h: 210 },
+  { id: '10x15', label: '10 × 15 cm (foto)', w: 100, h: 150 },
+  { id: 'custom', label: 'Personalizado', w: 0, h: 0 },
+]
+
+/** Tamanho de cada peça (mm), com ou sem sangria. */
+function cellSize(t: Template, withBleed: boolean) {
+  return withBleed ? { cw: t.w + 2 * t.bleed, ch: t.h + 2 * t.bleed } : { cw: t.w, ch: t.h }
+}
+
+/** Quantas peças cabem no papel, em colunas e linhas. */
+function gridCount(t: Template, withBleed: boolean, pw: number, ph: number, margin: number, gap: number) {
+  const { cw, ch } = cellSize(t, withBleed)
+  const cols = Math.floor((pw - 2 * margin + gap) / (cw + gap))
+  const rows = Math.floor((ph - 2 * margin + gap) / (ch + gap))
+  return { cols: Math.max(0, cols), rows: Math.max(0, rows), cw, ch }
+}
+
+/** Monta a imagem final: arte única ou folha com peças centradas em colunas e linhas. */
+async function buildCanvas(p: Project, o: ExportOpts) {
+  const t = p.template
+  const { cw, ch } = cellSize(t, o.withBleed)
+  const off = o.withBleed ? 0 : t.bleed
+  let pageW = cw
+  let pageH = ch
+  const cells: [number, number][] = []
+  if (o.kind === 'single') {
+    cells.push([0, 0])
+  } else {
+    const { cols, rows } = gridCount(t, o.withBleed, o.pw, o.ph, o.margin, o.gap)
+    if (cols < 1 || rows < 1) throw new Error('A peça não cabe neste papel. Escolha um papel maior ou reduza a margem.')
+    pageW = o.pw
+    pageH = o.ph
+    const gridW = cols * cw + (cols - 1) * o.gap
+    const gridH = rows * ch + (rows - 1) * o.gap
+    const x0 = (pageW - gridW) / 2
+    const y0 = (pageH - gridH) / 2
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) cells.push([x0 + c * (cw + o.gap), y0 + r * (ch + o.gap)])
+    }
+  }
+  const k = o.dpi / MM
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(pageW * k)
+  canvas.height = Math.round(pageH * k)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas indisponível neste navegador.')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  for (const [x, y] of cells) {
+    ctx.save()
+    ctx.setTransform(k, 0, 0, k, 0, 0)
+    ctx.beginPath()
+    ctx.rect(x, y, cw, ch)
+    ctx.clip()
+    ctx.setTransform(k, 0, 0, k, (x - off) * k, (y - off) * k)
+    for (const l of p.layers) {
+      if (!l.hidden) await drawLayer(ctx, l)
+    }
+    ctx.restore()
+  }
+  if (o.kind === 'sheet' && o.marks) {
+    // Marcas de corte nos cantos de cada peça, fora da sangria.
+    ctx.save()
+    ctx.setTransform(k, 0, 0, k, 0, 0)
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth = 0.1
+    const b = o.withBleed ? t.bleed : 0
+    const s = b + 1
+    const L = 3
+    for (const [x, y] of cells) {
+      const x1 = x + b
+      const y1 = y + b
+      const x2 = x1 + t.w
+      const y2 = y1 + t.h
+      const corners: [number, number, number, number][] = [[x1, y1, -1, -1], [x2, y1, 1, -1], [x1, y2, -1, 1], [x2, y2, 1, 1]]
+      for (const [cx, cy, sx, sy] of corners) {
+        ctx.beginPath(); ctx.moveTo(cx + sx * s, cy); ctx.lineTo(cx + sx * (s + L), cy); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(cx, cy + sy * s); ctx.lineTo(cx, cy + sy * (s + L)); ctx.stroke()
+      }
+    }
+    ctx.restore()
+  }
+  return { canvas, pageW, pageH }
+}
+
+function canvasBlob(c: HTMLCanvasElement, type: string, quality?: number) {
+  return new Promise<Blob>((resolve, reject) =>
+    c.toBlob(b => (b ? resolve(b) : reject(new Error('Falha ao gerar a imagem.'))), type, quality))
+}
+
+function download(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+function safeName(s: string) {
+  return s.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'arte'
+}
+
+function escXml(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Abre a janela de impressão com a imagem no tamanho do papel. */
+function printImage(dataUrl: string, pw: number, ph: number) {
+  const w = window.open('', '_blank')
+  if (!w) throw new Error('O navegador bloqueou a janela de impressão. Permita pop-ups para este site.')
+  w.document.write(
+    `<!doctype html><html><head><meta charset="utf-8"><title>Imprimir</title><style>` +
+    `@page{size:${pw}mm ${ph}mm;margin:0}html,body{margin:0;padding:0}img{display:block;width:${pw}mm;height:${ph}mm}` +
+    `</style></head><body><img src="${dataUrl}" onload="window.print()"></body></html>`)
+  w.document.close()
+}
+
+/* ---------- Utilitários de ficheiro (sem bibliotecas externas) ---------- */
+
+const te = new TextEncoder()
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  const n = parts.reduce((a, p) => a + p.length, 0)
+  const out = new Uint8Array(n)
+  let o = 0
+  for (const p of parts) { out.set(p, o); o += p.length }
+  return out
+}
+
+const CRC_TABLE = (() => {
+  const tb = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    tb[n] = c >>> 0
+  }
+  return tb
+})()
+
+function crc32(b: Uint8Array) {
+  let c = 0xffffffff
+  for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xff] ^ (c >>> 8)
+  return (c ^ 0xffffffff) >>> 0
+}
+
+/** ZIP sem compressão, base do .docx e do .xlsx. */
+function zip(files: { name: string; data: Uint8Array }[]): Uint8Array {
+  const DATE = ((2026 - 1980) << 9) | (11 << 5) | 12
+  const TIME = 0
+  const local: Uint8Array[] = []
+  const central: Uint8Array[] = []
+  let offset = 0
+  for (const f of files) {
+    const name = te.encode(f.name)
+    const crc = crc32(f.data)
+    const size = f.data.length
+    const lh = new DataView(new ArrayBuffer(30))
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true)
+    lh.setUint16(10, TIME, true); lh.setUint16(12, DATE, true); lh.setUint32(14, crc, true)
+    lh.setUint32(18, size, true); lh.setUint32(22, size, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true)
+    local.push(new Uint8Array(lh.buffer), name, f.data)
+    const ch = new DataView(new ArrayBuffer(46))
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true)
+    ch.setUint16(10, 0, true); ch.setUint16(12, TIME, true); ch.setUint16(14, DATE, true); ch.setUint32(16, crc, true)
+    ch.setUint32(20, size, true); ch.setUint32(24, size, true); ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true)
+    central.push(new Uint8Array(ch.buffer), name)
+    offset += 30 + name.length + size
+  }
+  const cdata = concat(central)
+  const end = new DataView(new ArrayBuffer(22))
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true)
+  end.setUint32(12, cdata.length, true); end.setUint32(16, offset, true)
+  return concat([...local, cdata, new Uint8Array(end.buffer)])
+}
+
+/** PDF com uma página do tamanho do papel e a imagem JPEG em tamanho total. */
+function buildPdf(jpeg: Uint8Array, imgW: number, imgH: number, pwMm: number, phMm: number): Uint8Array {
+  const W = (pwMm * 72 / MM).toFixed(2)
+  const H = (phMm * 72 / MM).toFixed(2)
+  const content = `q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`
+  const bodies: Uint8Array[] = [
+    te.encode('<< /Type /Catalog /Pages 2 0 R >>'),
+    te.encode('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
+    te.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`),
+    te.encode(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`),
+    concat([
+      te.encode(`<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`),
+      jpeg,
+      te.encode('\nendstream'),
+    ]),
+  ]
+  const parts: Uint8Array[] = []
+  const offsets: number[] = []
+  let pos = 0
+  const push = (b: Uint8Array) => { parts.push(b); pos += b.length }
+  push(te.encode('%PDF-1.4\n'))
+  bodies.forEach((b, i) => {
+    offsets.push(pos)
+    push(te.encode(`${i + 1} 0 obj\n`))
+    push(b)
+    push(te.encode('\nendobj\n'))
+  })
+  const xref = pos
+  let x = `xref\n0 ${bodies.length + 1}\n0000000000 65535 f \n` + offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('')
+  x += `trailer\n<< /Size ${bodies.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+  push(te.encode(x))
+  return concat(parts)
+}
+
+const EMU_PER_MM = 36000
+const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+
+/** Word: página do tamanho do papel com a arte inserida. */
+function buildDocx(jpeg: Uint8Array, pwMm: number, phMm: number): Uint8Array {
+  const tw = (mm: number) => Math.round(mm * 1440 / 25.4)
+  const cx = Math.round(pwMm * EMU_PER_MM)
+  const cy = Math.round(phMm * EMU_PER_MM)
+  const drawing =
+    `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>` +
+    `<wp:docPr id="1" name="Arte"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+    `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="1" name="arte.jpg"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`
+  const doc = `${XML_HEAD}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ` +
+    `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ` +
+    `xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>` +
+    `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r>${drawing}</w:r></w:p>` +
+    `<w:sectPr><w:pgSz w:w="${tw(pwMm)}" w:h="${tw(phMm)}"/>` +
+    `<w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>` +
+    `</w:body></w:document>`
+  const REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
+  const OD = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+  return zip([
+    { name: '[Content_Types].xml', data: te.encode(`${XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/>` +
+      `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`) },
+    { name: '_rels/.rels', data: te.encode(`${XML_HEAD}<Relationships xmlns="${REL}"><Relationship Id="rId1" Type="${OD}/officeDocument" Target="word/document.xml"/></Relationships>`) },
+    { name: 'word/_rels/document.xml.rels', data: te.encode(`${XML_HEAD}<Relationships xmlns="${REL}"><Relationship Id="rId1" Type="${OD}/image" Target="media/image1.jpg"/></Relationships>`) },
+    { name: 'word/document.xml', data: te.encode(doc) },
+    { name: 'word/media/image1.jpg', data: jpeg },
+  ])
+}
+
+/** Excel: uma folha com um título e a arte inserida abaixo. */
+function buildXlsx(jpeg: Uint8Array, pwMm: number, phMm: number, title: string): Uint8Array {
+  const cx = Math.round(pwMm * EMU_PER_MM)
+  const cy = Math.round(phMm * EMU_PER_MM)
+  const SS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+  const OD = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+  const REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
+  const sheet = `${XML_HEAD}<worksheet xmlns="${SS}" xmlns:r="${OD}"><sheetData><row r="1">` +
+    `<c r="A1" t="inlineStr"><is><t>${escXml(title)}</t></is></c></row></sheetData><drawing r:id="rId1"/></worksheet>`
+  const drawing = `${XML_HEAD}<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ` +
+    `xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><xdr:oneCellAnchor>` +
+    `<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+    `<xdr:ext cx="${cx}" cy="${cy}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Arte"/><xdr:cNvPicPr/></xdr:nvPicPr>` +
+    `<xdr:blipFill><a:blip xmlns:r="${OD}" r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
+    `<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>` +
+    `</xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>`
+  const styles = `${XML_HEAD}<styleSheet xmlns="${SS}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>` +
+    `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>` +
+    `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
+    `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
+    `<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>` +
+    `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`
+  return zip([
+    { name: '[Content_Types].xml', data: te.encode(`${XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+      `<Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/>` +
+      `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+      `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+      `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
+      `<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>`) },
+    { name: '_rels/.rels', data: te.encode(`${XML_HEAD}<Relationships xmlns="${REL}"><Relationship Id="rId1" Type="${OD}/officeDocument" Target="xl/workbook.xml"/></Relationships>`) },
+    { name: 'xl/workbook.xml', data: te.encode(`${XML_HEAD}<workbook xmlns="${SS}" xmlns:r="${OD}"><sheets><sheet name="Arte" sheetId="1" r:id="rId1"/></sheets></workbook>`) },
+    { name: 'xl/_rels/workbook.xml.rels', data: te.encode(`${XML_HEAD}<Relationships xmlns="${REL}">` +
+      `<Relationship Id="rId1" Type="${OD}/worksheet" Target="worksheets/sheet1.xml"/>` +
+      `<Relationship Id="rId2" Type="${OD}/styles" Target="styles.xml"/></Relationships>`) },
+    { name: 'xl/styles.xml', data: te.encode(styles) },
+    { name: 'xl/worksheets/sheet1.xml', data: te.encode(sheet) },
+    { name: 'xl/worksheets/_rels/sheet1.xml.rels', data: te.encode(`${XML_HEAD}<Relationships xmlns="${REL}"><Relationship Id="rId1" Type="${OD}/drawing" Target="../drawings/drawing1.xml"/></Relationships>`) },
+    { name: 'xl/drawings/drawing1.xml', data: te.encode(drawing) },
+    { name: 'xl/drawings/_rels/drawing1.xml.rels', data: te.encode(`${XML_HEAD}<Relationships xmlns="${REL}"><Relationship Id="rId1" Type="${OD}/image" Target="../media/image1.jpg"/></Relationships>`) },
+    { name: 'xl/media/image1.jpg', data: jpeg },
+  ])
+}
+
+/** Copia os bytes para um Blob (evita o tipo ArrayBufferLike, que o navegador não aceita). */
+function blobOf(u: Uint8Array, opts: BlobPropertyBag) {
+  return new Blob([new Uint8Array(u)], opts)
+}
+
+/** Gera o ficheiro no formato escolhido e descarrega-o. */
+async function exportFile(p: Project, o: ExportOpts, fmt: Fmt, base: string) {
+  const { canvas, pageW, pageH } = await buildCanvas(p, o)
+  if (fmt === 'png') return download(await canvasBlob(canvas, 'image/png'), `${base}.png`)
+  if (fmt === 'jpg') return download(await canvasBlob(canvas, 'image/jpeg', 0.95), `${base}.jpg`)
+  const jpeg = new Uint8Array(await (await canvasBlob(canvas, 'image/jpeg', 0.95)).arrayBuffer())
+  if (fmt === 'pdf') {
+    return download(blobOf(buildPdf(jpeg, canvas.width, canvas.height, pageW, pageH) , { type: 'application/pdf' }), `${base}.pdf`)
+  }
+  if (fmt === 'docx') {
+    return download(blobOf(buildDocx(jpeg, pageW, pageH) , { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), `${base}.docx`)
+  }
+  return download(blobOf(buildXlsx(jpeg, pageW, pageH, base) , { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${base}.xlsx`)
+}
+
+/* ---------- Janela de exportação com pré-visualização ---------- */
+
+function ExportOverlay({ project, onClose }: { project: Project; onClose: () => void }) {
+  const toast = useToast()
+  const t = project.template
+  const [kind, setKind] = useState<'single' | 'sheet'>('single')
+  const [withBleed, setWithBleed] = useState(true)
+  const [paperId, setPaperId] = useState('A4')
+  const [cw, setCw] = useState(210)
+  const [ch, setCh] = useState(297)
+  const [margin, setMargin] = useState(10)
+  const [gap, setGap] = useState(8)
+  const [marks, setMarks] = useState(true)
+  const [fmt, setFmt] = useState<Fmt>('pdf')
+  const [preview, setPreview] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const paper = paperId === 'custom'
+    ? { id: 'custom', label: `${cw} × ${ch} mm`, w: cw, h: ch }
+    : PAPERS.find(x => x.id === paperId) ?? PAPERS[0]
+  const grid = gridCount(t, withBleed, paper.w, paper.h, margin, gap)
+  const fmtInfo = FORMATS.find(f => f.id === fmt) ?? FORMATS[0]
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  // Pré-visualização rápida (96 DPI). O ficheiro final sai na resolução do gabarito.
+  useEffect(() => {
+    let alive = true
+    const timer = setTimeout(async () => {
+      try {
+        const { canvas } = await buildCanvas(project, { kind, dpi: 96, withBleed, pw: paper.w, ph: paper.h, margin, gap, marks })
+        if (alive) { setPreview(canvas.toDataURL('image/png')); setErr(null) }
+      } catch (e) {
+        if (alive) { setErr(e instanceof Error ? e.message : 'Erro na pré-visualização.'); setPreview(null) }
+      }
+    }, 150)
+    return () => { alive = false; clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, kind, withBleed, paperId, cw, ch, margin, gap, marks])
+
+  const run = async (mode: 'save' | 'print') => {
+    setBusy(true)
+    try {
+      const o: ExportOpts = { kind, dpi: t.dpi, withBleed, pw: paper.w, ph: paper.h, margin, gap, marks }
+      const base = `${safeName(project.name)}_${kind === 'sheet' ? `folha-${paper.w}x${paper.h}mm` : 'arte'}_${t.dpi}dpi`
+      if (mode === 'print') {
+        const { canvas, pageW, pageH } = await buildCanvas(project, o)
+        printImage(canvas.toDataURL('image/jpeg', 0.95), pageW, pageH)
+      } else {
+        await exportFile(project, o, fmt, base)
+        toast.push('success', `Ficheiro ${fmtInfo.label} gerado.`)
+      }
+    } catch (e) {
+      toast.push('error', e instanceof Error ? e.message : 'Falha na exportação.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const seg = (on: boolean) => cn('rounded-lg border px-3 py-2 text-left text-xs', on ? 'border-brand/60 bg-brand/15 text-white' : 'border-white/10 text-white/60 hover:text-white')
+
+  return createPortal(
+    <div className="fixed inset-0 z-40 flex flex-col bg-[#0b1020] text-white">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#0f1628] px-4">
+        <button className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10" onClick={onClose}>
+          <ArrowLeft className="h-4 w-4" /> Voltar ao editor
+        </button>
+        <span className="truncate text-sm font-medium">Salvar ou imprimir · {project.name}</span>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <aside className="w-80 shrink-0 space-y-5 overflow-y-auto border-r border-white/10 bg-[#0f1628] p-4">
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">1. O que gerar</p>
+            <div className="grid grid-cols-1 gap-2">
+              <button className={seg(kind === 'single')} onClick={() => setKind('single')}><span className="block font-medium">Arte única</span><span className="text-white/40">Uma peça no tamanho do gabarito</span></button>
+              <button className={seg(kind === 'sheet')} onClick={() => setKind('sheet')}><span className="block font-medium">Folha organizada</span><span className="text-white/40">Várias peças em colunas e linhas</span></button>
+            </div>
+            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Incluir sangria</label>
+            <p className="text-[11px] text-white/40">Tamanho de cada peça: {grid.cw} × {grid.ch} mm</p>
+          </section>
+
+          {kind === 'sheet' && (
+            <section className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/40">2. Papel e organização</p>
+              <Field label="Papel">
+                <select className="input" value={paperId} onChange={e => setPaperId(e.target.value)}>
+                  {PAPERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </Field>
+              {paperId === 'custom' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Largura (mm)"><input type="number" className="input" value={cw} onChange={e => setCw(Number(e.target.value))} /></Field>
+                  <Field label="Altura (mm)"><input type="number" className="input" value={ch} onChange={e => setCh(Number(e.target.value))} /></Field>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Margem (mm)"><input type="number" step="0.5" className="input" value={margin} onChange={e => setMargin(Number(e.target.value))} /></Field>
+                <Field label="Espaço entre peças (mm)"><input type="number" step="0.5" className="input" value={gap} onChange={e => setGap(Number(e.target.value))} /></Field>
+              </div>
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={marks} onChange={e => setMarks(e.target.checked)} /> Marcas de corte</label>
+              <p className="text-[11px] text-white/40">Para as marcas de corte, use espaço entre peças de pelo menos 6 mm.</p>
+              <div className={cn('rounded-lg border p-3 text-xs', grid.cols * grid.rows > 0 ? 'border-white/10 text-white/70' : 'border-red-400/30 text-red-200')}>
+                {grid.cols > 0 && grid.rows > 0
+                  ? <>{grid.cols} colunas × {grid.rows} linhas = <strong>{grid.cols * grid.rows} peças</strong> em {paper.label}</>
+                  : 'A peça não cabe neste papel.'}
+              </div>
+            </section>
+          )}
+
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/40">{kind === 'sheet' ? '3.' : '2.'} Formato do ficheiro</p>
+            <div className="grid grid-cols-2 gap-2">
+              {FORMATS.map(f => (
+                <button key={f.id} className={seg(fmt === f.id)} onClick={() => setFmt(f.id)}>
+                  <span className="block font-medium">{f.label}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-white/40">{fmtInfo.hint}. Resolução: {t.dpi} DPI.</p>
+          </section>
+
+          <div className="grid grid-cols-2 gap-2 pt-2">
+            <Button variant="outline" onClick={() => run('print')} loading={busy}><Printer className="h-4 w-4" /> Imprimir</Button>
+            <Button onClick={() => run('save')} loading={busy}><Download className="h-4 w-4" /> Salvar {fmtInfo.label}</Button>
+          </div>
+        </aside>
+
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-auto p-6">
+          {err ? (
+            <p className="max-w-md rounded-lg border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">{err}</p>
+          ) : preview ? (
+            <img src={preview} alt="Pré-visualização antes de imprimir ou salvar" className="max-h-[calc(100vh-9rem)] max-w-full object-contain shadow-2xl" />
+          ) : (
+            <p className="text-sm text-white/50">A gerar pré-visualização…</p>
+          )}
+          <p className="mt-3 text-xs text-white/40">Pré-visualização. O ficheiro sai em {t.dpi} DPI.</p>
+        </main>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Página                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -335,10 +791,10 @@ export default function Gabaritos() {
   const [past, setPast] = useState<Layer[][]>([])
   const [future, setFuture] = useState<Layer[][]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [tplMode, setTplMode] = useState<'project' | 'library' | null>(null)
+  const [tplMode, setTplMode] = useState<'project' | 'library' | 'new-art' | null>(null)
   const [tplDraft, setTplDraft] = useState<Template>(BUILTIN[0])
   const [showGuides, setShowGuides] = useState(true)
-  const [withBleed, setWithBleed] = useState(true)
+  const [exportOpen, setExportOpen] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [area, setArea] = useState({ w: 900, h: 600 })
   const [saved, setSaved] = useState(true)
@@ -586,26 +1042,6 @@ export default function Gabaritos() {
     window.addEventListener('pointerup', up)
   }
 
-  /* Exportação */
-  const exportPng = async () => {
-    if (!project || !t) return
-    const low = project.layers.filter(l => !l.hidden && l.kind === 'image' && (effectiveDpi(l) ?? Infinity) < t.dpi)
-    if (low.length && !window.confirm(`Há ${low.length} imagem(ns) abaixo de ${t.dpi} DPI na dimensão impressa. A qualidade pode sair pixelizada. Exportar mesmo assim?`)) return
-    try {
-      const blob = await renderPng(project, t.dpi, withBleed)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      const { W, H } = dims(t)
-      a.href = url
-      a.download = `${project.name.replace(/[^\w\-]+/g, '_').slice(0, 60)}_${withBleed ? W : t.w}x${withBleed ? H : t.h}mm_${t.dpi}dpi.png`
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-      toast.push('success', `PNG exportado em ${t.dpi} DPI.`)
-    } catch (e) {
-      toast.push('error', e instanceof Error ? e.message : 'Falha na exportação.')
-    }
-  }
-
   const selected = project?.layers.find(l => l.id === selId) ?? null
   const layersTopFirst = project ? [...project.layers].reverse() : []
 
@@ -665,8 +1101,7 @@ export default function Gabaritos() {
         </button>
         <div className="ml-auto flex items-center gap-2">
           <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-white/40 xl:inline">{saved ? 'Guardado neste navegador' : 'Não guardado'}</span>
-          <label className="flex shrink-0 items-center gap-1 whitespace-nowrap text-xs text-white/60"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Com sangria</label>
-          <Button size="sm" className="shrink-0 whitespace-nowrap" onClick={exportPng}><Download className="h-4 w-4" /> PNG {t.dpi} DPI</Button>
+          <Button size="sm" className="shrink-0 whitespace-nowrap" onClick={() => setExportOpen(true)}><Printer className="h-4 w-4" /> Salvar / Imprimir</Button>
         </div>
       </header>
 
@@ -888,12 +1323,14 @@ export default function Gabaritos() {
       )}
 
       {editor && createPortal(editor, document.body)}
+      {exportOpen && project && <ExportOverlay project={project} onClose={() => setExportOpen(false)} />}
 
       {/* Escolha de gabarito */}
       <Modal open={pickerOpen} onClose={() => setPickerOpen(false)} title="Escolher gabarito" wide
-        footer={<Button variant="outline" onClick={() => { setPickerOpen(false); setTplDraft({ ...BUILTIN[0], id: '', name: 'Novo gabarito', builtin: false }); setTplMode('library') }}>
-          <FilePlus2 className="h-4 w-4" /> Novo gabarito personalizado
-        </Button>}>
+        footer={<div className="flex flex-wrap gap-2">
+          <Button onClick={() => { setPickerOpen(false); setTplDraft({ ...BUILTIN[0], id: '', name: 'Arte personalizada', group: GROUPS[0], emoji: '✏️', builtin: false }); setTplMode('new-art') }}><Ruler className="h-4 w-4" /> Criar arte com medidas</Button>
+          <Button variant="outline" onClick={() => { setPickerOpen(false); setTplDraft({ ...BUILTIN[0], id: '', name: 'Novo gabarito', builtin: false }); setTplMode('library') }}><FilePlus2 className="h-4 w-4" /> Novo gabarito personalizado</Button>
+        </div>}>
         <div className="space-y-5">
           {GROUPS.map(g => (
             <div key={g}>
@@ -929,7 +1366,7 @@ export default function Gabaritos() {
         mode={tplMode ?? 'project'}
         initial={tplMode === 'project' && t ? t : tplDraft}
         onClose={() => setTplMode(null)}
-        onApply={nt => { patchProject(p => ({ ...p, template: { ...nt, builtin: false } })); setTplMode(null); toast.push('success', 'Medidas aplicadas a esta arte.') }}
+        onApply={nt => { if (tplMode === 'new-art') { createProject({ ...nt, id: 'custom', builtin: false }); setTplMode(null); return } patchProject(p => ({ ...p, template: { ...nt, builtin: false } })); setTplMode(null); toast.push('success', 'Medidas aplicadas a esta arte.') }}
         onSaveLibrary={nt => {
           const saved: Template = { ...nt, id: uid(), builtin: false }
           setStore(s => ({ ...s, custom: [...s.custom, saved] }))
