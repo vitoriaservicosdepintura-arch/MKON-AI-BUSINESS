@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as RPointerEvent } from 'react'
-import { ArrowDown, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, ImageIcon, Lock, Redo2, Ruler, Square, Trash2, Type, Undo2, Unlock, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent as RPointerEvent, type WheelEvent } from 'react'
+import { AlignCenter, AlignCenterVertical, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Frame, ImageIcon, Lock, Maximize, Minus, Plus, Redo2, Ruler, Square, Trash2, Type, Undo2, Unlock, Upload } from 'lucide-react'
 import { Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 import { cn, dateTime } from '@/lib/utils'
@@ -24,11 +24,8 @@ type Layer = {
   id: string; kind: 'image' | 'text' | 'rect'; name: string
   x: number; y: number; w: number; h: number   // mm, referencial = canto da área com sangria
   hidden?: boolean; locked?: boolean
-  // imagem
   src?: string; srcW?: number; srcH?: number; zoom?: number; offX?: number; offY?: number
-  // texto
   text?: string; font?: string; size?: number; bold?: boolean; align?: 'left' | 'center' | 'right'; color?: string
-  // retângulo
   fill?: string; radius?: number
 }
 type Project = { id: string; name: string; template: Template; layers: Layer[]; updated: string }
@@ -78,7 +75,7 @@ function loadStore(): Store {
   }
 }
 
-/** Calcula a posição e o tamanho da imagem dentro da caixa (cover + zoom + deslocamento, sem deixar vazios). */
+/** Posição e tamanho da imagem dentro da caixa (cover + zoom + deslocamento, sem deixar vazios). */
 function imgRect(l: Layer, iw: number, ih: number) {
   const s = Math.max(l.w / iw, l.h / ih) * (l.zoom ?? 1)   // mm por pixel da imagem original
   const dw = iw * s
@@ -262,7 +259,7 @@ function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }:
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={mode === 'project' ? 'Medidas do gabarito desta arte' : 'Novo gabarito na biblioteca'} wide
+    <Modal open={open} onClose={onClose} title={mode === 'project' ? 'Medidas do gabarito desta arte' : 'Gabarito na biblioteca'} wide
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>
         {mode === 'project'
@@ -329,7 +326,7 @@ function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }:
 export default function Gabaritos() {
   const toast = useToast()
   const [store, setStore] = useState<Store>(loadStore)
-  const [currentId, setCurrentId] = useState<string | null>(store.projects[0]?.id ?? null)
+  const [currentId, setCurrentId] = useState<string | null>(null)   // arte aberta em tela cheia
   const [selId, setSelId] = useState<string | null>(null)
   const [past, setPast] = useState<Layer[][]>([])
   const [future, setFuture] = useState<Layer[][]>([])
@@ -338,17 +335,34 @@ export default function Gabaritos() {
   const [tplDraft, setTplDraft] = useState<Template>(BUILTIN[0])
   const [showGuides, setShowGuides] = useState(true)
   const [withBleed, setWithBleed] = useState(true)
+  const [zoom, setZoom] = useState(1)
+  const [area, setArea] = useState({ w: 900, h: 600 })
   const [saved, setSaved] = useState(true)
+  const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const replaceRef = useRef<HTMLInputElement>(null)
   const replaceIdRef = useRef<string | null>(null)
+  const areaRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; before: Layer[]; moved: boolean } | null>(null)
 
   const library = useMemo(() => [...BUILTIN, ...store.custom], [store.custom])
   const project = store.projects.find(p => p.id === currentId) ?? null
   const t = project?.template ?? null
   const dim = t ? dims(t) : null
-  const ppm = dim ? Math.min(640 / dim.W, 520 / dim.H) : 1
+  const editorOpen = !!(project && t && dim)
+
+  /* Medida da área de desenho para encaixar o gabarito inteiro na tela */
+  useEffect(() => {
+    const el = areaRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setArea({ w: el.clientWidth, h: el.clientHeight }))
+    ro.observe(el)
+    setArea({ w: el.clientWidth, h: el.clientHeight })
+    return () => ro.disconnect()
+  }, [editorOpen])
+
+  const fitPpm = dim ? Math.min((area.w - 120) / dim.W, (area.h - 120) / dim.H) : 1
+  const ppm = Math.max(0.5, fitPpm * zoom)
 
   /* Persistência local (debounce) */
   useEffect(() => {
@@ -358,7 +372,7 @@ export default function Gabaritos() {
         setSaved(true)
       } catch {
         setSaved(false)
-        toast.push('error', 'Armazenamento do navegador cheio. Remova artes antigas ou imagens grandes.')
+        toast.push('error', 'Armazenamento do navegador cheio. Apague artes antigas ou use imagens menores.')
       }
     }, 400)
     return () => clearTimeout(timer)
@@ -397,8 +411,14 @@ export default function Gabaritos() {
     patchProject(p => ({ ...p, layers: next }))
   }
 
-  /* Atalhos: Ctrl+Z, Ctrl+Y, Delete */
+  const deleteLayer = (id: string) => {
+    if (!project) return
+    setLayers(project.layers.filter(x => x.id !== id)); setSelId(null)
+  }
+
+  /* Atalhos: Ctrl+Z, Ctrl+Y, Delete, setas (ajuste fino), Esc */
   const keyHandler = (e: KeyboardEvent) => {
+    if (!editorOpen) return
     const el = e.target as HTMLElement | null
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
     const mod = e.ctrlKey || e.metaKey
@@ -406,6 +426,16 @@ export default function Gabaritos() {
     if (mod && k === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
     else if (mod && (k === 'y' || (e.shiftKey && k === 'z'))) { e.preventDefault(); redo() }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && selId) { e.preventDefault(); deleteLayer(selId) }
+    else if (e.key === 'Escape') setSelId(null)
+    else if (selId && project && e.key.startsWith('Arrow')) {
+      e.preventDefault()
+      const step = e.shiftKey ? 5 : 0.5
+      const l = project.layers.find(x => x.id === selId)
+      if (!l || l.locked) return
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+      updateLayer(selId, { x: round2(l.x + dx), y: round2(l.y + dy) })
+    }
   }
   const keyRef = useRef(keyHandler)
   keyRef.current = keyHandler
@@ -415,26 +445,33 @@ export default function Gabaritos() {
     return () => window.removeEventListener('keydown', h)
   }, [])
 
+  /* Bloquear o scroll da página enquanto o editor está em tela cheia */
+  useEffect(() => {
+    if (!editorOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [editorOpen])
+
   /* Projetos */
   const openProject = (id: string) => {
-    setCurrentId(id); setSelId(null); setPast([]); setFuture([])
+    setCurrentId(id); setSelId(null); setPast([]); setFuture([]); setZoom(1)
   }
+  const closeEditor = () => { setCurrentId(null); setSelId(null); setPast([]); setFuture([]) }
   const createProject = (tpl: Template) => {
     const p: Project = { id: uid(), name: `${tpl.name} — arte ${store.projects.length + 1}`, template: { ...tpl, builtin: false }, layers: [], updated: new Date().toISOString() }
     setStore(s => ({ ...s, projects: [p, ...s.projects] }))
-    setCurrentId(p.id); setSelId(null); setPast([]); setFuture([])
     setPickerOpen(false)
+    openProject(p.id)
   }
   const duplicateProject = (p: Project) => {
     const c: Project = { ...p, id: uid(), name: `${p.name} (cópia)`, layers: p.layers.map(l => ({ ...l, id: uid() })), updated: new Date().toISOString() }
     setStore(s => ({ ...s, projects: [c, ...s.projects] }))
-    openProject(c.id)
   }
   const deleteProject = (p: Project) => {
     if (!window.confirm(`Apagar a arte "${p.name}"?`)) return
-    const rest = store.projects.filter(x => x.id !== p.id)
     setStore(s => ({ ...s, projects: s.projects.filter(x => x.id !== p.id) }))
-    if (currentId === p.id) { setCurrentId(rest[0]?.id ?? null); setSelId(null); setPast([]); setFuture([]) }
+    if (currentId === p.id) closeEditor()
   }
 
   /* Camadas */
@@ -445,12 +482,8 @@ export default function Gabaritos() {
   }
   const addRect = () => {
     if (!project || !dim) return
-    const l: Layer = { id: uid(), kind: 'rect', name: 'Retângulo', x: dim.W / 2 - 20, y: dim.H / 2 - 12, w: 40, h: 24, fill: '#1d4ed8', radius: 0 }
+    const l: Layer = { id: uid(), kind: 'rect', name: 'Forma', x: dim.W / 2 - 20, y: dim.H / 2 - 12, w: 40, h: 24, fill: '#1d4ed8', radius: 0 }
     setLayers([...project.layers, l]); setSelId(l.id)
-  }
-  const deleteLayer = (id: string) => {
-    if (!project) return
-    setLayers(project.layers.filter(x => x.id !== id)); setSelId(null)
   }
   const duplicateLayer = (id: string) => {
     if (!project) return
@@ -471,6 +504,20 @@ export default function Gabaritos() {
     setLayers(next)
   }
 
+  /** Centraliza ou preenche o corte em relação ao gabarito (não à sangria). */
+  const centerLayer = (axis: 'h' | 'v') => {
+    if (!selected || !t) return
+    const b = t.bleed
+    if (axis === 'h') updateLayer(selected.id, { x: round2(b + (t.w - selected.w) / 2) })
+    else updateLayer(selected.id, { y: round2(b + (t.h - selected.h) / 2) })
+  }
+  const fillCut = () => {
+    if (!selected || !t || selected.kind !== 'image' || !selected.srcW || !selected.srcH) return
+    const s = Math.max(t.w / selected.srcW, t.h / selected.srcH)
+    const w = round2(selected.srcW * s), h = round2(selected.srcH * s)
+    updateLayer(selected.id, { x: round2(t.bleed + (t.w - w) / 2), y: round2(t.bleed + (t.h - h) / 2), w, h, zoom: 1, offX: 0, offY: 0 })
+  }
+
   const onImageFile = async (file: File | undefined, replaceId?: string | null) => {
     if (!file || !project || !dim) return
     if (!file.type.startsWith('image/')) return toast.push('error', 'Escolha uma imagem (JPG, PNG, WEBP ou GIF).')
@@ -486,7 +533,7 @@ export default function Gabaritos() {
       if (h > H * 0.8) { h = H * 0.8; w = h * img.w / img.h }
       const l: Layer = {
         id: uid(), kind: 'image', name: `Imagem ${project.layers.filter(x => x.kind === 'image').length + 1}`,
-        x: (W - w) / 2, y: (H - h) / 2, w: round2(w), h: round2(h),
+        x: round2((W - w) / 2), y: round2((H - h) / 2), w: round2(w), h: round2(h),
         src: img.src, srcW: img.w, srcH: img.h, zoom: 1, offX: 0, offY: 0,
       }
       setLayers([...project.layers, l]); setSelId(l.id)
@@ -495,7 +542,21 @@ export default function Gabaritos() {
     }
   }
 
-  /* Arrastar camadas no preview */
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setDragOver(false)
+    const f = Array.from(e.dataTransfer.files).find(x => x.type.startsWith('image/'))
+    if (f) onImageFile(f)
+    else toast.push('error', 'Arraste uma imagem (JPG, PNG, WEBP ou GIF).')
+  }
+
+  const onWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (!e.ctrlKey) return
+    e.preventDefault()
+    setZoom(z => clamp(z * (e.deltaY < 0 ? 1.1 : 0.9), 0.25, 4))
+  }
+
+  /* Arrastar camadas no canvas */
   const startDrag = (e: RPointerEvent<HTMLDivElement>, l: Layer) => {
     if (!project || l.locked) return
     e.stopPropagation()
@@ -542,20 +603,20 @@ export default function Gabaritos() {
   }
 
   const selected = project?.layers.find(l => l.id === selId) ?? null
+  const layersTopFirst = project ? [...project.layers].reverse() : []
 
-  /* ---------------- Render ---------------- */
+  /* ---------------- Render de camadas no canvas ---------------- */
 
   const renderLayer = (l: Layer) => {
-    if (!t) return null
     const sel = selId === l.id
-    const common = {
-      left: l.x * ppm, top: l.y * ppm, width: l.w * ppm, height: l.h * ppm,
-      display: l.hidden ? 'none' : undefined,
-    } as const
     return (
       <div key={l.id} onPointerDown={e => startDrag(e, l)}
-        className={cn('absolute', l.locked ? 'pointer-events-none' : 'cursor-move', sel && 'outline outline-1 outline-dashed outline-cyan-300')}
-        style={{ ...common, overflow: l.kind === 'text' ? 'visible' : 'hidden' }}>
+        className={cn('absolute', l.locked ? 'pointer-events-none' : 'cursor-move', sel && 'outline outline-2 outline-cyan-300')}
+        style={{
+          left: l.x * ppm, top: l.y * ppm, width: l.w * ppm, height: l.h * ppm,
+          display: l.hidden ? 'none' : undefined,
+          overflow: l.kind === 'text' ? 'visible' : 'hidden',
+        }}>
         {l.kind === 'image' && l.src && l.srcW && l.srcH && (() => {
           const r = imgRect(l, l.srcW, l.srcH)
           return <img src={l.src} alt="" draggable={false} className="pointer-events-none absolute max-w-none select-none"
@@ -574,206 +635,254 @@ export default function Gabaritos() {
     )
   }
 
-  const layersTopFirst = project ? [...project.layers].reverse() : []
+  const btn = 'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent'
+
+  /* ---------------- Editor em tela cheia ---------------- */
+
+  const editor = editorOpen && project && t && dim ? (
+    <div className="fixed inset-0 z-40 flex flex-col bg-[#0b1020] text-white">
+      {/* Barra superior */}
+      <header className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#0f1628] px-3 py-2">
+        <button className={btn} onClick={closeEditor}><ArrowLeft className="h-4 w-4" /> Voltar às artes</button>
+        <input className="input h-8 w-64 max-w-[40vw]" value={project.name} aria-label="Nome da arte"
+          onChange={e => patchProject(p => ({ ...p, name: e.target.value }))} />
+        <button className={btn} onClick={() => setTplMode('project')}><Ruler className="h-4 w-4" /> Medidas</button>
+        <span className="mx-1 h-5 w-px bg-white/10" />
+        <button className={btn} onClick={undo} disabled={past.length === 0} title="Desfazer (Ctrl+Z)"><Undo2 className="h-4 w-4" /> Desfazer</button>
+        <button className={btn} onClick={redo} disabled={future.length === 0} title="Refazer (Ctrl+Y)"><Redo2 className="h-4 w-4" /> Refazer</button>
+        <span className="mx-1 h-5 w-px bg-white/10" />
+        <button className={btn} onClick={() => setZoom(z => clamp(z * 0.8, 0.25, 4))} title="Diminuir"><Minus className="h-4 w-4" /></button>
+        <button className={cn(btn, 'min-w-[3.5rem] justify-center')} onClick={() => setZoom(1)} title="Ajustar à tela">{Math.round(zoom * 100)}%</button>
+        <button className={btn} onClick={() => setZoom(z => clamp(z * 1.25, 0.25, 4))} title="Aumentar"><Plus className="h-4 w-4" /></button>
+        <button className={btn} onClick={() => setZoom(1)} title="Ajustar à tela"><Maximize className="h-4 w-4" /> Ajustar</button>
+        <button className={btn} onClick={() => setShowGuides(!showGuides)}>
+          {showGuides ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} Guias
+        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="hidden text-[11px] text-white/40 md:inline">{saved ? 'Guardado neste navegador' : 'Não guardado'}</span>
+          <label className="flex items-center gap-1 text-xs text-white/60"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Com sangria</label>
+          <Button size="sm" onClick={exportPng}><Download className="h-4 w-4" /> Exportar PNG {t.dpi} DPI</Button>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        {/* Painel esquerdo: adicionar e camadas */}
+        <aside className="flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-r border-white/10 bg-[#0f1628] p-4">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/40">Adicionar</p>
+            <div className="grid grid-cols-1 gap-2">
+              <button className="flex items-center gap-3 rounded-lg border border-white/10 p-3 text-left text-sm hover:border-brand/50 hover:bg-brand/10" onClick={() => fileRef.current?.click()}>
+                <ImageIcon className="h-5 w-5 text-brand-soft" />
+                <span><span className="block font-medium">Imagem</span><span className="text-[11px] text-white/40">Ou arraste para o canvas</span></span>
+              </button>
+              <button className="flex items-center gap-3 rounded-lg border border-white/10 p-3 text-left text-sm hover:border-brand/50 hover:bg-brand/10" onClick={addText}>
+                <Type className="h-5 w-5 text-brand-soft" />
+                <span><span className="block font-medium">Texto</span><span className="text-[11px] text-white/40">Nome, data, frase</span></span>
+              </button>
+              <button className="flex items-center gap-3 rounded-lg border border-white/10 p-3 text-left text-sm hover:border-brand/50 hover:bg-brand/10" onClick={addRect}>
+                <Square className="h-5 w-5 text-brand-soft" />
+                <span><span className="block font-medium">Forma</span><span className="text-[11px] text-white/40">Faixa ou fundo colorido</span></span>
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { onImageFile(e.target.files?.[0]); e.target.value = '' }} />
+              <input ref={replaceRef} type="file" accept="image/*" className="hidden"
+                onChange={e => { onImageFile(e.target.files?.[0], replaceIdRef.current); e.target.value = '' }} />
+            </div>
+          </div>
+
+          <div className="min-h-0">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/40">Camadas <span className="normal-case text-white/30">(topo primeiro)</span></p>
+            {layersTopFirst.length === 0 ? (
+              <p className="text-xs text-white/40">Ainda sem camadas.</p>
+            ) : (
+              <div className="space-y-1">
+                {layersTopFirst.map(l => {
+                  const dpi = effectiveDpi(l)
+                  const lowRes = dpi !== null && dpi < t.dpi
+                  return (
+                    <div key={l.id} onClick={() => setSelId(l.id)}
+                      className={cn('flex items-center gap-0.5 rounded-lg px-2 py-1.5 text-xs', selId === l.id ? 'bg-brand/20' : 'hover:bg-white/[0.05]', l.hidden && 'opacity-50')}>
+                      <span className="min-w-0 flex-1 truncate">
+                        {l.name}
+                        {lowRes && <span className="ml-1 text-amber-300">⚠ {dpi} DPI</span>}
+                      </span>
+                      <button title={l.hidden ? 'Mostrar' : 'Ocultar'} className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); updateLayer(l.id, { hidden: !l.hidden }) }}>
+                        {l.hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                      <button title={l.locked ? 'Desbloquear' : 'Bloquear'} className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); updateLayer(l.id, { locked: !l.locked }) }}>
+                        {l.locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+                      </button>
+                      <button title="Subir" className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); moveLayer(l.id, 1) }}><ArrowUp className="h-3.5 w-3.5" /></button>
+                      <button title="Descer" className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); moveLayer(l.id, -1) }}><ArrowDown className="h-3.5 w-3.5" /></button>
+                      <button title="Duplicar" className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); duplicateLayer(l.id) }}><Copy className="h-3.5 w-3.5" /></button>
+                      <button title="Apagar" className="p-1 text-white/50 hover:text-red-300" onClick={e => { e.stopPropagation(); deleteLayer(l.id) }}><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </aside>
+
+        {/* Canvas */}
+        <main ref={areaRef} className="relative min-w-0 flex-1 overflow-auto"
+          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          onWheel={onWheel}>
+          <div className="flex min-h-full min-w-full items-center justify-center p-16"
+            onPointerDown={() => setSelId(null)}>
+            <div className="relative">
+              <div className={cn('relative bg-white shadow-2xl transition-shadow', dragOver && 'ring-4 ring-brand/60')}
+                style={{ width: dim.W * ppm, height: dim.H * ppm, overflow: 'hidden' }}
+                onPointerDown={e => { e.stopPropagation(); setSelId(null) }}>
+                {project.layers.map(renderLayer)}
+                {showGuides && <Guides t={t} ppm={ppm} />}
+                {project.layers.length === 0 && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-slate-400">
+                    Arraste uma imagem para aqui<br />ou use os botões à esquerda
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap justify-center gap-4 text-[11px] text-white/50">
+                <span><span className="inline-block h-2 w-3 bg-cyan-400 align-middle" /> Linha de corte</span>
+                <span><span className="inline-block h-2 w-3 border border-dashed border-green-400 align-middle" /> Área segura</span>
+                <span><span className="inline-block h-2 w-3 bg-black/50 align-middle" /> Sangria</span>
+                {t.hole && <span><span className="inline-block h-2 w-3 border border-pink-400 align-middle" /> Furo</span>}
+                <span>{t.w}×{t.h} mm · sangria {t.bleed} mm · {t.dpi} DPI</span>
+              </div>
+            </div>
+          </div>
+        </main>
+
+        {/* Painel direito: propriedades */}
+        <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-white/10 bg-[#0f1628] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-white/40">Propriedades</p>
+          {!selected ? (
+            <div className="rounded-lg border border-dashed border-white/10 p-4 text-xs text-white/50">
+              Clique numa imagem, texto ou forma no canvas para editar. Pode também selecioná-la na lista de camadas.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Field label="Nome"><input className="input" value={selected.name} onChange={e => updateLayer(selected.id, { name: e.target.value })} /></Field>
+
+              <div>
+                <p className="mb-1 text-[11px] text-white/40">Posição no corte</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button className={btn + ' justify-center border border-white/10'} onClick={() => centerLayer('h')}><AlignCenter className="h-3.5 w-3.5" /> Centro H</button>
+                  <button className={btn + ' justify-center border border-white/10'} onClick={() => centerLayer('v')}><AlignCenterVertical className="h-3.5 w-3.5" /> Centro V</button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="X (mm)"><input type="number" step="0.5" className="input" value={selected.x} onChange={e => updateLayer(selected.id, { x: Number(e.target.value) })} /></Field>
+                <Field label="Y (mm)"><input type="number" step="0.5" className="input" value={selected.y} onChange={e => updateLayer(selected.id, { y: Number(e.target.value) })} /></Field>
+                <Field label="Largura (mm)"><input type="number" step="0.5" className="input" value={selected.w} onChange={e => updateLayer(selected.id, { w: Number(e.target.value) })} /></Field>
+                <Field label="Altura (mm)"><input type="number" step="0.5" className="input" value={selected.h} onChange={e => updateLayer(selected.id, { h: Number(e.target.value) })} /></Field>
+              </div>
+
+              {selected.kind === 'image' && (
+                <>
+                  <button className={btn + ' w-full justify-center border border-white/10'} onClick={fillCut}><Frame className="h-3.5 w-3.5" /> Preencher o corte</button>
+                  <Field label={`Zoom (${(selected.zoom ?? 1).toFixed(2)}×)`}>
+                    <input type="range" min={1} max={3} step={0.01} className="w-full" value={selected.zoom ?? 1} onChange={e => updateLayer(selected.id, { zoom: Number(e.target.value) })} />
+                  </Field>
+                  <Field label="Deslocar horizontal">
+                    <input type="range" min={-0.5} max={0.5} step={0.01} className="w-full" value={selected.offX ?? 0} onChange={e => updateLayer(selected.id, { offX: Number(e.target.value) })} />
+                  </Field>
+                  <Field label="Deslocar vertical">
+                    <input type="range" min={-0.5} max={0.5} step={0.01} className="w-full" value={selected.offY ?? 0} onChange={e => updateLayer(selected.id, { offY: Number(e.target.value) })} />
+                  </Field>
+                  <p className={cn('text-xs', (effectiveDpi(selected) ?? 0) < t.dpi ? 'text-amber-300' : 'text-white/50')}>
+                    Resolução efetiva: {effectiveDpi(selected) ?? '—'} DPI {(effectiveDpi(selected) ?? 0) < t.dpi && '· abaixo do recomendado'}
+                  </p>
+                  <button className={btn + ' w-full justify-center border border-white/10'} onClick={() => { replaceIdRef.current = selected.id; replaceRef.current?.click() }}>
+                    <Upload className="h-3.5 w-3.5" /> Substituir imagem
+                  </button>
+                </>
+              )}
+
+              {selected.kind === 'text' && (
+                <>
+                  <Field label="Texto">
+                    <textarea rows={3} className="input" value={selected.text ?? ''} onChange={e => updateLayer(selected.id, { text: e.target.value })} />
+                  </Field>
+                  <Field label="Fonte">
+                    <select className="input" value={selected.font ?? 'Arial'} onChange={e => updateLayer(selected.id, { font: e.target.value })}>
+                      {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </Field>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Tamanho (mm)"><input type="number" step="0.5" min={1} className="input" value={selected.size ?? 6} onChange={e => updateLayer(selected.id, { size: Number(e.target.value) })} /></Field>
+                    <Field label="Cor"><input type="color" className="input h-9 p-1" value={selected.color ?? '#111111'} onChange={e => updateLayer(selected.id, { color: e.target.value })} /></Field>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(['left', 'center', 'right'] as const).map(a => (
+                      <button key={a} onClick={() => updateLayer(selected.id, { align: a })}
+                        className={cn('flex-1 rounded-lg border px-2 py-1.5 text-xs', (selected.align ?? 'left') === a ? 'border-brand/60 bg-brand/15' : 'border-white/10 text-white/60 hover:text-white')}>
+                        {a === 'left' ? 'Esquerda' : a === 'center' ? 'Centro' : 'Direita'}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!selected.bold} onChange={e => updateLayer(selected.id, { bold: e.target.checked })} /> Negrito</label>
+                </>
+              )}
+
+              {selected.kind === 'rect' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Cor"><input type="color" className="input h-9 p-1" value={selected.fill ?? '#000000'} onChange={e => updateLayer(selected.id, { fill: e.target.value })} /></Field>
+                  <Field label="Raio (mm)"><input type="number" step="0.5" min={0} className="input" value={selected.radius ?? 0} onChange={e => updateLayer(selected.id, { radius: Number(e.target.value) })} /></Field>
+                </div>
+              )}
+            </div>
+          )}
+        </aside>
+      </div>
+
+      {/* Dica de atalhos */}
+      <footer className="border-t border-white/10 bg-[#0f1628] px-4 py-1.5 text-[11px] text-white/45">
+        Arraste para mover · Setas: ajustar 0,5 mm (Shift: 5 mm) · Delete: apagar · Ctrl+Z / Ctrl+Y: desfazer / refazer · Ctrl+roda do rato: zoom · Esc: desselecionar
+      </footer>
+    </div>
+  ) : null
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Editor de Gabaritos"
         description="Artes para ímanes, chaveiros e calendários, com medidas reais em mm, sangria, área segura e exportação em PNG para impressão."
-        actions={<Button variant="outline" onClick={() => setPickerOpen(true)}><FilePlus2 className="h-4 w-4" /> Nova arte</Button>}
+        actions={<Button onClick={() => setPickerOpen(true)}><FilePlus2 className="h-4 w-4" /> Nova arte</Button>}
       />
 
-      <div className="grid gap-4 xl:grid-cols-[260px_1fr_300px]">
-        {/* Projetos */}
+      {store.projects.length === 0 ? (
         <Card>
-          <CardHeader title="Artes" subtitle={`${store.projects.length} guardadas neste navegador`} />
-          {store.projects.length === 0 ? (
-            <EmptyState icon={<ImageIcon className="h-5 w-5" />} title="Sem artes" description="Escolha um gabarito para começar." />
-          ) : (
-            <div className="max-h-[70vh] divide-y divide-white/[0.05] overflow-y-auto">
+          <EmptyState icon={<ImageIcon className="h-5 w-5" />} title="Sem artes"
+            description="Escolha um gabarito para abrir o editor em tela cheia."
+            action={<Button onClick={() => setPickerOpen(true)}>Escolher gabarito</Button>} />
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <CardHeader title="Artes guardadas" subtitle={`${store.projects.length} neste navegador · ${saved ? 'guardado' : 'não guardado'}`} />
+            <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
               {store.projects.map(p => (
-                <div key={p.id} className={cn('flex items-start gap-2 px-4 py-3', p.id === currentId && 'bg-brand/10')}>
-                  <button className="min-w-0 flex-1 text-left" onClick={() => openProject(p.id)}>
+                <div key={p.id} className="flex flex-col rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-brand/40">
+                  <button className="min-w-0 text-left" onClick={() => openProject(p.id)}>
                     <p className="truncate text-sm font-medium">{p.name}</p>
-                    <p className="text-[11px] text-white/40">{p.template.w}×{p.template.h} mm · {dateTime(p.updated)}</p>
+                    <p className="mt-1 text-[11px] text-white/40">{p.template.w}×{p.template.h} mm · {p.layers.length} camadas · {dateTime(p.updated)}</p>
                   </button>
-                  <button title="Duplicar" className="p-1 text-white/40 hover:text-white" onClick={() => duplicateProject(p)}><Copy className="h-3.5 w-3.5" /></button>
-                  <button title="Apagar" className="p-1 text-white/40 hover:text-red-300" onClick={() => deleteProject(p)}><Trash2 className="h-3.5 w-3.5" /></button>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" onClick={() => openProject(p.id)}>Abrir editor</Button>
+                    <Button size="sm" variant="ghost" onClick={() => duplicateProject(p)}><Copy className="h-3.5 w-3.5" /> Duplicar</Button>
+                    <Button size="sm" variant="ghost" onClick={() => deleteProject(p)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                  </div>
                 </div>
               ))}
             </div>
-          )}
-        </Card>
+          </Card>
+        </>
+      )}
 
-        {/* Área de trabalho */}
-        <Card className="min-w-0">
-          {!project || !t || !dim ? (
-            <EmptyState icon={<Square className="h-5 w-5" />} title="Nenhuma arte aberta"
-              description="Crie uma arte a partir de um gabarito da biblioteca."
-              action={<Button onClick={() => setPickerOpen(true)}>Escolher gabarito</Button>} />
-          ) : (
-            <div className="p-4">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <input className="input max-w-xs" value={project.name} onChange={e => patchProject(p => ({ ...p, name: e.target.value }))} aria-label="Nome da arte" />
-                <Button size="sm" variant="ghost" onClick={() => setTplMode('project')}><Ruler className="h-3.5 w-3.5" /> Medidas</Button>
-                <Button size="sm" variant="ghost" onClick={undo} disabled={past.length === 0} title="Desfazer (Ctrl+Z)"><Undo2 className="h-3.5 w-3.5" /></Button>
-                <Button size="sm" variant="ghost" onClick={redo} disabled={future.length === 0} title="Refazer (Ctrl+Y)"><Redo2 className="h-3.5 w-3.5" /></Button>
-                <Button size="sm" variant="ghost" onClick={() => setShowGuides(!showGuides)}>
-                  {showGuides ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />} Guias
-                </Button>
-                <span className="ml-auto text-[11px] text-white/40">{saved ? 'Guardado neste navegador' : 'Não guardado'}</span>
-              </div>
-
-              <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-white/60">
-                <span>Corte {t.w}×{t.h} mm</span>
-                <span>· Sangria {t.bleed} mm</span>
-                <span>· Área segura {t.safe} mm</span>
-                <span>· {t.dpi} DPI</span>
-                <label className="ml-auto flex items-center gap-1"><input type="checkbox" checked={withBleed} onChange={e => setWithBleed(e.target.checked)} /> Exportar com sangria</label>
-                <Button size="sm" onClick={exportPng}><Download className="h-3.5 w-3.5" /> Exportar PNG {t.dpi} DPI</Button>
-              </div>
-
-              <div className="overflow-auto rounded-xl bg-[#0b1020] p-6">
-                <div className="relative mx-auto bg-white shadow-2xl" style={{ width: dim.W * ppm, height: dim.H * ppm, overflow: 'hidden' }}
-                  onPointerDown={() => setSelId(null)}>
-                  {project.layers.map(renderLayer)}
-                  {showGuides && <Guides t={t} ppm={ppm} />}
-                </div>
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-4 text-[11px] text-white/50">
-                <span><span className="inline-block h-2 w-3 bg-cyan-400 align-middle" /> Linha de corte</span>
-                <span><span className="inline-block h-2 w-3 border border-dashed border-green-400 align-middle" /> Área segura</span>
-                <span><span className="inline-block h-2 w-3 bg-black/50 align-middle" /> Sangria (fora do corte)</span>
-                {t.hole && <span><span className="inline-block h-2 w-3 border border-pink-400 align-middle" /> Furo do chaveiro</span>}
-              </div>
-              <p className="mt-2 text-[11px] text-white/35">
-                Os formatos são referências iniciais. Confirme as medidas com o fornecedor antes de produzir.
-              </p>
-            </div>
-          )}
-        </Card>
-
-        {/* Camadas e propriedades */}
-        <div className="space-y-4">
-          {project && t && (
-            <>
-              <Card>
-                <CardHeader title="Adicionar" />
-                <div className="grid grid-cols-3 gap-2 p-4">
-                  <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}><Upload className="h-3.5 w-3.5" /> Imagem</Button>
-                  <Button size="sm" variant="outline" onClick={addText}><Type className="h-3.5 w-3.5" /> Texto</Button>
-                  <Button size="sm" variant="outline" onClick={addRect}><Square className="h-3.5 w-3.5" /> Forma</Button>
-                  <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { onImageFile(e.target.files?.[0]); e.target.value = '' }} />
-                  <input ref={replaceRef} type="file" accept="image/*" className="hidden"
-                    onChange={e => { onImageFile(e.target.files?.[0], replaceIdRef.current); e.target.value = '' }} />
-                </div>
-              </Card>
-
-              <Card>
-                <CardHeader title="Camadas" subtitle="De cima para baixo" />
-                {layersTopFirst.length === 0 ? (
-                  <p className="p-4 text-xs text-white/40">Sem camadas. Adicione uma imagem, texto ou forma.</p>
-                ) : (
-                  <div className="divide-y divide-white/[0.05]">
-                    {layersTopFirst.map(l => {
-                      const dpi = effectiveDpi(l)
-                      const lowRes = dpi !== null && dpi < t.dpi
-                      return (
-                        <div key={l.id} onClick={() => setSelId(l.id)}
-                          className={cn('flex items-center gap-1 px-3 py-2 text-xs', selId === l.id ? 'bg-brand/10' : 'hover:bg-white/[0.03]')}>
-                          <span className="min-w-0 flex-1 truncate">
-                            {l.name}
-                            {lowRes && <span className="ml-1 text-amber-300">⚠ {dpi} DPI</span>}
-                          </span>
-                          <button title={l.hidden ? 'Mostrar' : 'Ocultar'} className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); updateLayer(l.id, { hidden: !l.hidden }) }}>
-                            {l.hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          </button>
-                          <button title={l.locked ? 'Desbloquear' : 'Bloquear'} className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); updateLayer(l.id, { locked: !l.locked }) }}>
-                            {l.locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-                          </button>
-                          <button title="Subir" className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); moveLayer(l.id, 1) }}><ArrowUp className="h-3.5 w-3.5" /></button>
-                          <button title="Descer" className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); moveLayer(l.id, -1) }}><ArrowDown className="h-3.5 w-3.5" /></button>
-                          <button title="Duplicar" className="p-1 text-white/50 hover:text-white" onClick={e => { e.stopPropagation(); duplicateLayer(l.id) }}><Copy className="h-3.5 w-3.5" /></button>
-                          <button title="Apagar" className="p-1 text-white/50 hover:text-red-300" onClick={e => { e.stopPropagation(); deleteLayer(l.id) }}><Trash2 className="h-3.5 w-3.5" /></button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </Card>
-
-              {selected && (
-                <Card>
-                  <CardHeader title="Propriedades" subtitle={selected.kind === 'image' ? 'Imagem' : selected.kind === 'text' ? 'Texto' : 'Forma'} />
-                  <div className="space-y-3 p-4">
-                    <Field label="Nome"><input className="input" value={selected.name} onChange={e => updateLayer(selected.id, { name: e.target.value })} /></Field>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Field label="X (mm)"><input type="number" step="0.5" className="input" value={selected.x} onChange={e => updateLayer(selected.id, { x: Number(e.target.value) })} /></Field>
-                      <Field label="Y (mm)"><input type="number" step="0.5" className="input" value={selected.y} onChange={e => updateLayer(selected.id, { y: Number(e.target.value) })} /></Field>
-                      <Field label="Largura (mm)"><input type="number" step="0.5" className="input" value={selected.w} onChange={e => updateLayer(selected.id, { w: Number(e.target.value) })} /></Field>
-                      <Field label="Altura (mm)"><input type="number" step="0.5" className="input" value={selected.h} onChange={e => updateLayer(selected.id, { h: Number(e.target.value) })} /></Field>
-                    </div>
-
-                    {selected.kind === 'image' && (
-                      <>
-                        <Field label={`Zoom (${(selected.zoom ?? 1).toFixed(2)}×)`}>
-                          <input type="range" min={1} max={3} step={0.01} className="w-full" value={selected.zoom ?? 1} onChange={e => updateLayer(selected.id, { zoom: Number(e.target.value) })} />
-                        </Field>
-                        <Field label="Deslocar horizontal">
-                          <input type="range" min={-0.5} max={0.5} step={0.01} className="w-full" value={selected.offX ?? 0} onChange={e => updateLayer(selected.id, { offX: Number(e.target.value) })} />
-                        </Field>
-                        <Field label="Deslocar vertical">
-                          <input type="range" min={-0.5} max={0.5} step={0.01} className="w-full" value={selected.offY ?? 0} onChange={e => updateLayer(selected.id, { offY: Number(e.target.value) })} />
-                        </Field>
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className={cn(selected.srcW && effectiveDpi(selected) !== null && (effectiveDpi(selected) ?? 0) < t.dpi ? 'text-amber-300' : 'text-white/50')}>
-                            Resolução efetiva: {effectiveDpi(selected) ?? '—'} DPI
-                          </span>
-                          <Button size="sm" variant="outline" onClick={() => { replaceIdRef.current = selected.id; replaceRef.current?.click() }}>
-                            <Upload className="h-3.5 w-3.5" /> Substituir imagem
-                          </Button>
-                        </div>
-                      </>
-                    )}
-
-                    {selected.kind === 'text' && (
-                      <>
-                        <Field label="Texto">
-                          <textarea rows={3} className="input" value={selected.text ?? ''} onChange={e => updateLayer(selected.id, { text: e.target.value })} />
-                        </Field>
-                        <div className="grid grid-cols-2 gap-2">
-                          <Field label="Fonte">
-                            <select className="input" value={selected.font ?? 'Arial'} onChange={e => updateLayer(selected.id, { font: e.target.value })}>
-                              {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
-                            </select>
-                          </Field>
-                          <Field label="Tamanho (mm)"><input type="number" step="0.5" min={1} className="input" value={selected.size ?? 6} onChange={e => updateLayer(selected.id, { size: Number(e.target.value) })} /></Field>
-                          <Field label="Cor"><input type="color" className="input h-9 p-1" value={selected.color ?? '#111111'} onChange={e => updateLayer(selected.id, { color: e.target.value })} /></Field>
-                          <Field label="Alinhamento">
-                            <select className="input" value={selected.align ?? 'left'} onChange={e => updateLayer(selected.id, { align: e.target.value as Layer['align'] })}>
-                              <option value="left">Esquerda</option><option value="center">Centro</option><option value="right">Direita</option>
-                            </select>
-                          </Field>
-                        </div>
-                        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!selected.bold} onChange={e => updateLayer(selected.id, { bold: e.target.checked })} /> Negrito</label>
-                      </>
-                    )}
-
-                    {selected.kind === 'rect' && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <Field label="Cor"><input type="color" className="input h-9 p-1" value={selected.fill ?? '#000000'} onChange={e => updateLayer(selected.id, { fill: e.target.value })} /></Field>
-                        <Field label="Raio (mm)"><input type="number" step="0.5" min={0} className="input" value={selected.radius ?? 0} onChange={e => updateLayer(selected.id, { radius: Number(e.target.value) })} /></Field>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+      {editor}
 
       {/* Escolha de gabarito */}
       <Modal open={pickerOpen} onClose={() => setPickerOpen(false)} title="Escolher gabarito" wide
