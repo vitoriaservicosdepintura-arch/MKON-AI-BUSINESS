@@ -40,6 +40,11 @@ const HEART = 'M50 90 C10 60 0 40 0 25 C0 10 12 0 25 0 C38 0 47 10 50 20 C53 10 
 const FONTS = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'Verdana', 'Trebuchet MS', 'Courier New', 'Impact']
 const GROUPS = ['Ímanes de geladeira', 'Chaveiros', 'Ímanes de calendário']
 const GROUP_EMOJI: Record<string, string> = { [GROUPS[0]]: '🧲', [GROUPS[1]]: '🔑', [GROUPS[2]]: '📅' }
+type FrameFormat = { id: 'redondo58' | 'quadrado60'; label: string; w: number; h: number; shape: Shape }
+const FRAME_FORMATS: FrameFormat[] = [
+  { id: 'redondo58', label: 'Redondo 58 mm', w: 58, h: 58, shape: 'circle' },
+  { id: 'quadrado60', label: 'Quadrado 60 mm', w: 60, h: 60, shape: 'rect' },
+]
 
 const base = { bleed: 2, safe: 3, dpi: 300 as const, builtin: true }
 /** Formatos iniciais de referência. Confirmar medidas de corte e acabamento com o fornecedor. */
@@ -254,8 +259,6 @@ function Guides({ t, ppm }: { t: Template; ppm: number }) {
 /* ------------------------------------------------------------------ */
 /* Modal de gabarito (medidas)                                         */
 /* ------------------------------------------------------------------ */
-
-const SHAPE_LABEL: Record<Shape, string> = { rect: 'Retangular', rounded: 'Arredondado', circle: 'Circular', heart: 'Coração' }
 
 /** Forma do quadro em coordenadas locais (mm). */
 function FrameShape({ shape, w, h, r, fill, stroke, strokeWidth, dash }: {
@@ -729,10 +732,8 @@ const CELL_PRESETS: { id: string; label: string; w: number; h: number; circle?: 
   { id: '90x120', label: 'Mini calendário 90 × 120 mm', w: 90, h: 120 },
   { id: '148x210', label: 'Calendário A5 148 × 210 mm', w: 148, h: 210 },
   { id: '10x15', label: 'Foto 10 × 15 cm', w: 100, h: 150 },
-  { id: 'molde-25', label: 'Molde redondo 25 mm', w: 25, h: 25, circle: true },
-  { id: 'molde-32', label: 'Molde redondo 32 mm', w: 32, h: 32, circle: true },
-  { id: 'molde-44', label: 'Molde redondo 44 mm', w: 44, h: 44, circle: true },
   { id: 'molde-58', label: 'Molde redondo 58 mm', w: 58, h: 58, circle: true },
+  { id: 'molde-60', label: 'Molde quadrado 60 mm', w: 60, h: 60 },
   { id: 'custom', label: 'Medida personalizada', w: 0, h: 0 },
 ]
 
@@ -1088,6 +1089,8 @@ export default function Gabaritos() {
   const [dragOver, setDragOver] = useState(false)
   const [frameMode, setFrameMode] = useState<'move' | 'image'>('move')   // quadro: mover o quadro ou a foto
   useEffect(() => { setFrameMode('move') }, [selId])
+  const [fmtGroup, setFmtGroup] = useState<string>(GROUPS[0])
+  const [fmtId, setFmtId] = useState<FrameFormat['id']>('redondo58')
   const fileRef = useRef<HTMLInputElement>(null)
   const replaceRef = useRef<HTMLInputElement>(null)
   const replaceIdRef = useRef<string | null>(null)
@@ -1234,18 +1237,20 @@ export default function Gabaritos() {
     const l: Layer = { id: uid(), kind: 'rect', name: 'Forma', x: dim.W / 2 - 20, y: dim.H / 2 - 12, w: 40, h: 24, fill: '#1d4ed8', radius: 0 }
     setLayers([...project.layers, l]); setSelId(l.id)
   }
-  /** Quadro de imagem com a medida do formato, reduzido se não couber na arte. */
-  const addFrame = (tp: Template) => {
-    if (!project || !dim) return
-    const k = Math.min(1, (dim.W - 8) / tp.w, (dim.H - 8) / tp.h)
-    const w = round2(tp.w * k)
-    const h = round2(tp.h * k)
-    const l: Layer = {
-      id: uid(), kind: 'frame', name: `Quadro ${tp.name}`,
-      x: round2((dim.W - w) / 2), y: round2((dim.H - h) / 2), w, h,
-      shape: tp.shape, radius: tp.radius, fit: 'contain', zoom: 1, offX: 0, offY: 0,
+  /** Aplica o formato à arte (medida de impressão) e cria o quadro com a área toda, pronto para a foto. */
+  const applyFormat = () => {
+    if (!project || !t) return
+    const f = FRAME_FORMATS.find(x => x.id === fmtId) ?? FRAME_FORMATS[0]
+    const tpl: Template = {
+      ...t, name: `${fmtGroup} · ${f.label}`, group: fmtGroup, emoji: GROUP_EMOJI[fmtGroup],
+      w: f.w, h: f.h, shape: f.shape, radius: 0, hole: undefined, builtin: false,
     }
-    setLayers([...project.layers, l]); setSelId(l.id)
+    const frame: Layer = {
+      id: uid(), kind: 'frame', name: `Quadro ${f.label}`, x: t.bleed, y: t.bleed, w: f.w, h: f.h,
+      shape: f.shape, radius: 0, fit: 'cover', zoom: 1, offX: 0, offY: 0,
+    }
+    patchProject(p => ({ ...p, template: tpl, layers: [...p.layers, frame] }))
+    setSelId(frame.id)
   }
   const duplicateLayer = (id: string) => {
     if (!project) return
@@ -1286,10 +1291,8 @@ export default function Gabaritos() {
     try {
       const img = await readImage(file)
       if (replaceId) {
-        const fr = project.layers.find(x => x.id === replaceId)
-        // Quadro retangular: ajusta a altura à foto, mantendo a largura escolhida.
-        const h = fr && fr.kind === 'frame' && fr.shape !== 'circle' ? round2(fr.w * img.h / img.w) : undefined
-        updateLayer(replaceId, { src: img.src, srcW: img.w, srcH: img.h, zoom: 1, offX: 0, offY: 0, fit: 'contain', ...(h !== undefined ? { h } : {}) })
+        // A foto preenche o quadro por inteiro (pode mudar para "caber sem cortar" nas propriedades).
+        updateLayer(replaceId, { src: img.src, srcW: img.w, srcH: img.h, zoom: 1, offX: 0, offY: 0, fit: 'cover' })
         setSelId(replaceId)
         return
       }
@@ -1460,24 +1463,22 @@ export default function Gabaritos() {
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/40">Quadros de imagem</p>
-            <p className="mb-2 text-[11px] text-white/40">A foto cabe inteira no quadro. Depois ajuste o tamanho e a largura.</p>
-            <div className="space-y-3">
-              {GROUPS.map(g => (
-                <div key={g}>
-                  <p className="mb-1.5 text-[11px] text-white/55">{GROUP_EMOJI[g]} {g}</p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {BUILTIN.filter(x => x.group === g).map(tp => (
-                      <button key={tp.id} title={tp.name} onClick={() => addFrame(tp)}
-                        className="rounded-lg border border-white/10 p-2 text-left text-[11px] hover:border-brand/50 hover:bg-brand/10">
-                        <span className="block text-sm leading-none">{tp.emoji}</span>
-                        <span className="mt-1 block font-medium">{tp.w} × {tp.h} mm</span>
-                        <span className="block text-white/40">{SHAPE_LABEL[tp.shape]}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/40">Formato da arte</p>
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 gap-1.5">
+                {GROUPS.map(g => (
+                  <button key={g} className={toggle(fmtGroup === g)} onClick={() => setFmtGroup(g)}>{GROUP_EMOJI[g]} {g}</button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {FRAME_FORMATS.map(f => (
+                  <button key={f.id} className={toggle(fmtId === f.id)} onClick={() => setFmtId(f.id)}>{f.label}</button>
+                ))}
+              </div>
+              <button className={btn + ' w-full justify-center border border-white/10'} onClick={applyFormat}>
+                <Frame className="h-3.5 w-3.5" /> Aplicar formato à arte
+              </button>
+              <p className="text-[11px] text-white/40">A arte passa a ter este formato na impressão. Depois, escolha a foto: ela preenche o quadro por inteiro.</p>
             </div>
           </div>
 
