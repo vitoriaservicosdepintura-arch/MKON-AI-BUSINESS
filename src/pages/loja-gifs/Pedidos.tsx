@@ -13,6 +13,7 @@ type Order = {
   customer_name?: string
   status: string
   total_amount: number
+  production_cost_total?: number | null
   payment_status: string
   shipping_method: string | null
   tracking_code: string | null
@@ -37,6 +38,29 @@ export default function LojaGifsPedidos() {
 
   useEffect(() => { load() }, [load])
 
+  /** Baixa o estoque dos produtos do pedido ao enviar (uma vez por pedido). */
+  const baixarEstoque = async (orderId: string) => {
+    const order = orders?.find(o => o.id === orderId)
+    if (!order) return
+    const reason = `Pedido ${order.order_number}`
+    const { data: ja } = await supabase.from('gif_stock_movements').select('id').eq('reason', reason).eq('movement_type', 'saida').limit(1)
+    if (ja && ja.length > 0) return
+    const { data: itens } = await supabase.from('gif_order_items').select('product_id, quantity').eq('order_id', orderId)
+    for (const it of (itens ?? []) as { product_id: string | null; quantity: number }[]) {
+      if (!it.product_id) continue
+      const { data: prod } = await supabase.from('gif_products').select('stock_quantity').eq('id', it.product_id).single()
+      if (!prod) continue
+      const previous = Number(prod.stock_quantity ?? 0)
+      const next = previous - Number(it.quantity)
+      await supabase.from('gif_stock_movements').insert({
+        product_id: it.product_id, movement_type: 'saida', quantity: it.quantity,
+        previous_quantity: previous, new_quantity: next, reason,
+      })
+      await supabase.from('gif_products').update({ stock_quantity: next }).eq('id', it.product_id)
+      if (next < 0) toast.push('error', `Estoque negativo após o pedido ${order.order_number}. Verifique o produto.`)
+    }
+  }
+
   /** Liga o pedido ao financeiro: pagamento confirmado gera uma receita; cancelamento cancela-a. */
   const syncFinance = async (orderId: string, newStatus: string) => {
     const order = orders?.find(o => o.id === orderId)
@@ -52,7 +76,19 @@ export default function LojaGifsPedidos() {
         description: `Pedido de GIFs ${order.order_number}`, gif_order_id: orderId,
       })
       if (error) toast.push('error', 'Pedido atualizado, mas não foi possível lançar a receita: ' + error.message)
+      // Custo de produção como despesa (uma vez por pedido)
+      const cost = Number(order.production_cost_total ?? 0)
+      if (cost > 0) {
+        const { data: despesa } = await supabase.from('transactions').select('id').eq('gif_order_id', orderId).eq('type', 'despesa').maybeSingle()
+        if (!despesa) {
+          await supabase.from('transactions').insert({
+            type: 'despesa', amount: cost, status: 'pago', due_on: today, paid_on: today,
+            description: `Produção do pedido ${order.order_number}`, gif_order_id: orderId,
+          })
+        }
+      }
     }
+    if (newStatus === 'enviado') await baixarEstoque(orderId)
     if (newStatus === 'cancelado') {
       await supabase.from('transactions').update({ status: 'cancelado' }).eq('gif_order_id', orderId).eq('type', 'receita')
     }
