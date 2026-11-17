@@ -37,10 +37,32 @@ export default function LojaGifsPedidos() {
 
   useEffect(() => { load() }, [load])
 
+  /** Liga o pedido ao financeiro: pagamento confirmado gera uma receita; cancelamento cancela-a. */
+  const syncFinance = async (orderId: string, newStatus: string) => {
+    const order = orders?.find(o => o.id === orderId)
+    if (newStatus === 'pagamento_confirmado' && order) {
+      const { data: existing } = await supabase.from('transactions').select('id').eq('gif_order_id', orderId).eq('type', 'receita').maybeSingle()
+      if (existing) {
+        await supabase.from('transactions').update({ status: 'pago', paid_on: new Date().toISOString().slice(0, 10) }).eq('id', existing.id)
+        return
+      }
+      const today = new Date().toISOString().slice(0, 10)
+      const { error } = await supabase.from('transactions').insert({
+        type: 'receita', amount: order.total_amount, status: 'pago', due_on: today, paid_on: today,
+        description: `Pedido de GIFs ${order.order_number}`, gif_order_id: orderId,
+      })
+      if (error) toast.push('error', 'Pedido atualizado, mas não foi possível lançar a receita: ' + error.message)
+    }
+    if (newStatus === 'cancelado') {
+      await supabase.from('transactions').update({ status: 'cancelado' }).eq('gif_order_id', orderId).eq('type', 'receita')
+    }
+  }
+
   const updateStatus = async (orderId: string, newStatus: string) => {
     const { error } = await supabase.from('gif_orders').update({ status: newStatus }).eq('id', orderId)
     if (error) toast.push('error', error.message)
     else {
+      await syncFinance(orderId, newStatus)
       await logActivity('gif_order.status_changed', 'gif_orders', orderId, { status: newStatus })
       toast.push('success', 'Status atualizado.')
       load()
