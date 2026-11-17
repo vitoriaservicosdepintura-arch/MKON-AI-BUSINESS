@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent as RPointerEvent, type WheelEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { AlignCenter, AlignCenterVertical, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Frame, ImageIcon, Lock, Maximize, Minus, Plus, Printer, Redo2, Ruler, Square, Trash2, Type, Undo2, Unlock, Upload } from 'lucide-react'
+import { AlignCenter, AlignCenterVertical, ArrowDown, ArrowLeft, ArrowUp, Copy, Download, Eye, EyeOff, FilePlus2, Frame, ImageIcon, Lock, Maximize, Minus, Plus, Printer, Redo2, Pencil, Ruler, Square, Star, Trash2, Type, Undo2, Unlock, Upload } from 'lucide-react'
 import { Button, Card, CardHeader, EmptyState, Field, Modal, PageHeader } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 import { cn, dateTime } from '@/lib/utils'
@@ -32,7 +32,7 @@ type Layer = {
   shape?: Shape; fit?: 'contain' | 'cover'; bg?: string   // quadro de imagem
 }
 type Project = { id: string; name: string; template: Template; layers: Layer[]; updated: string }
-type Store = { custom: Template[]; projects: Project[] }
+type Store = { custom: Template[]; projects: Project[]; fav?: string[] }
 
 const STORE_KEY = 'mkon-gabaritos-v1'
 const MM = 25.4
@@ -74,11 +74,11 @@ const dims = (t: Template) => ({ W: t.w + 2 * t.bleed, H: t.h + 2 * t.bleed })
 function loadStore(): Store {
   try {
     const raw = localStorage.getItem(STORE_KEY)
-    if (!raw) return { custom: [], projects: [] }
+    if (!raw) return { custom: [], projects: [], fav: [] }
     const s = JSON.parse(raw)
-    return { custom: Array.isArray(s.custom) ? s.custom : [], projects: Array.isArray(s.projects) ? s.projects : [] }
+    return { custom: Array.isArray(s.custom) ? s.custom : [], projects: Array.isArray(s.projects) ? s.projects : [], fav: Array.isArray(s.fav) ? s.fav : [] }
   } catch {
-    return { custom: [], projects: [] }
+    return { custom: [], projects: [], fav: [] }
   }
 }
 
@@ -1119,6 +1119,7 @@ export default function Gabaritos() {
   const [future, setFuture] = useState<Layer[][]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [tplMode, setTplMode] = useState<'project' | 'library' | 'new-art' | null>(null)
+  const [editLibId, setEditLibId] = useState<string | null>(null)   // gabarito guardado a editar
   const [tplDraft, setTplDraft] = useState<Template>(BUILTIN[0])
   const [showGuides, setShowGuides] = useState(true)
   const [exportOpen, setExportOpen] = useState(false)
@@ -1137,6 +1138,7 @@ export default function Gabaritos() {
   const dragRef = useRef<{ id: string; mode: 'move' | 'image' | 'resize'; sx: number; sy: number; ox: number; oy: number; ow: number; oh: number; ofx: number; ofy: number; before: Layer[]; moved: boolean } | null>(null)
 
   const library = useMemo(() => [...BUILTIN, ...store.custom], [store.custom])
+  const favs = new Set(store.fav ?? [])
   const project = store.projects.find(p => p.id === currentId) ?? null
   const t = project?.template ?? null
   const dim = t ? dims(t) : null
@@ -1782,14 +1784,26 @@ export default function Gabaritos() {
             <div key={g}>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/40">{GROUP_EMOJI[g]} {g}</p>
               <div className="grid gap-2 sm:grid-cols-2">
-                {library.filter(x => x.group === g).map(tpl => (
+                {[...library.filter(x => x.group === g)]
+                  .sort((a, b) => Number(favs.has(b.id)) - Number(favs.has(a.id)))
+                  .map(tpl => (
                   <div key={tpl.id} className="flex items-center gap-2 rounded-lg border border-white/10 p-3 hover:border-brand/40">
                     <button className="min-w-0 flex-1 text-left" onClick={() => createProject(tpl)}>
                       <p className="truncate text-sm"><span className="mr-2 text-lg">{tpl.emoji ?? '🖼️'}</span>{tpl.name}</p>
                       <p className="text-[11px] text-white/40">{tpl.w}×{tpl.h} mm · sangria {tpl.bleed} mm · {tpl.dpi} DPI{tpl.hole ? ' · furo' : ''}</p>
                     </button>
+                    <button title={favs.has(tpl.id) ? 'Remover dos favoritos' : 'Favoritar'} className={cn('p-1 hover:text-amber-300', favs.has(tpl.id) ? 'text-amber-300' : 'text-white/40')}
+                      onClick={() => setStore(s => ({ ...s, fav: favs.has(tpl.id) ? (s.fav ?? []).filter(x => x !== tpl.id) : [...(s.fav ?? []), tpl.id] }))}>
+                      <Star className={cn('h-3.5 w-3.5', favs.has(tpl.id) && 'fill-current')} />
+                    </button>
+                    {!tpl.builtin && (
+                      <button title="Editar gabarito" className="p-1 text-white/40 hover:text-white"
+                        onClick={() => { setPickerOpen(false); setEditLibId(tpl.id); setTplDraft({ ...tpl }); setTplMode('library') }}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <button title="Copiar e editar" className="p-1 text-white/40 hover:text-white"
-                      onClick={() => { setPickerOpen(false); setTplDraft({ ...tpl, id: '', name: `${tpl.name} (cópia)`, builtin: false }); setTplMode('library') }}>
+                      onClick={() => { setPickerOpen(false); setEditLibId(null); setTplDraft({ ...tpl, id: '', name: `${tpl.name} (cópia)`, builtin: false }); setTplMode('library') }}>
                       <Copy className="h-3.5 w-3.5" />
                     </button>
                     {!tpl.builtin && (
@@ -1811,13 +1825,19 @@ export default function Gabaritos() {
         open={tplMode !== null}
         mode={tplMode ?? 'project'}
         initial={tplMode === 'project' && t ? t : tplDraft}
-        onClose={() => setTplMode(null)}
+        onClose={() => { setTplMode(null); setEditLibId(null) }}
         onApply={nt => { if (tplMode === 'new-art') { createProject({ ...nt, id: 'custom', builtin: false }); setTplMode(null); return } patchProject(p => ({ ...p, template: { ...nt, builtin: false } })); setTplMode(null); toast.push('success', 'Medidas aplicadas a esta arte.') }}
         onSaveLibrary={nt => {
-          const saved: Template = { ...nt, id: uid(), builtin: false }
-          setStore(s => ({ ...s, custom: [...s.custom, saved] }))
+          if (editLibId) {
+            setStore(s => ({ ...s, custom: s.custom.map(c => (c.id === editLibId ? { ...nt, id: editLibId, builtin: false } : c)) }))
+            toast.push('success', 'Gabarito atualizado.')
+          } else {
+            const saved: Template = { ...nt, id: uid(), builtin: false }
+            setStore(s => ({ ...s, custom: [...s.custom, saved] }))
+            toast.push('success', 'Gabarito guardado na biblioteca.')
+          }
+          setEditLibId(null)
           setTplMode(null)
-          toast.push('success', 'Gabarito guardado na biblioteca.')
         }}
       />
     </div>
