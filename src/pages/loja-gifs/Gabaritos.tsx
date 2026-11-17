@@ -1009,8 +1009,8 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
         <span className="truncate text-sm font-medium">Salvar ou imprimir · {project.name}</span>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="w-80 shrink-0 space-y-5 overflow-y-auto border-r border-white/10 bg-[#0f1628] p-4">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <aside className="max-h-[34vh] w-full shrink-0 space-y-5 overflow-y-auto border-b border-white/10 bg-[#0f1628] p-4 lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r">
           <section className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-white/40">O que gerar</p>
             <div className="grid grid-cols-1 gap-2">
@@ -1090,7 +1090,7 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
           </div>
         </aside>
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-auto p-6">
+        <main className="flex min-h-[45vh] min-w-0 flex-1 flex-col items-center justify-center overflow-auto p-4 lg:min-h-0 lg:p-6">
           {err ? (
             <p className="max-w-md rounded-lg border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">{err}</p>
           ) : preview ? (
@@ -1479,9 +1479,9 @@ export default function Gabaritos() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Painel esquerdo: adicionar e camadas */}
-        <aside className="flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-r border-white/10 bg-[#0f1628] p-4">
+        <aside className="flex max-h-[34vh] w-full shrink-0 flex-col gap-4 overflow-y-auto border-b border-white/10 bg-[#0f1628] p-4 lg:max-h-none lg:w-64 lg:border-b-0 lg:border-r">
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/40">Adicionar</p>
             <div className="grid grid-cols-1 gap-2">
@@ -1558,7 +1558,7 @@ export default function Gabaritos() {
         </aside>
 
         {/* Canvas */}
-        <main ref={areaRef} className="relative min-w-0 flex-1 overflow-auto"
+        <main ref={areaRef} className="relative min-h-[45vh] min-w-0 flex-1 overflow-auto lg:min-h-0"
           onDragOver={e => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
@@ -1589,7 +1589,7 @@ export default function Gabaritos() {
         </main>
 
         {/* Painel direito: propriedades */}
-        <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-white/10 bg-[#0f1628] p-4">
+        <aside className="flex max-h-[40vh] w-full shrink-0 flex-col gap-4 overflow-y-auto border-t border-white/10 bg-[#0f1628] p-4 lg:max-h-none lg:w-72 lg:border-l lg:border-t-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-white/40">Propriedades</p>
           {!selected ? (
             <div className="rounded-lg border border-dashed border-white/10 p-4 text-xs text-white/50">
