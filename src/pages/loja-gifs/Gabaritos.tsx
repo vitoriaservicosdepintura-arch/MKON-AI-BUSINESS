@@ -9,7 +9,7 @@ import { cn, dateTime } from '@/lib/utils'
 /* Modelo de dados                                                     */
 /* ------------------------------------------------------------------ */
 
-type Shape = 'rect' | 'rounded' | 'circle' | 'heart'
+type Shape = 'rect' | 'rounded' | 'circle' | 'heart' | 'oval'
 type Hole = { x: number; y: number; d: number }
 type Template = {
   id: string; name: string; group: string
@@ -50,10 +50,17 @@ const base = { bleed: 2, safe: 3, dpi: 300 as const, builtin: true }
 /** Formatos iniciais de referência. Confirmar medidas de corte e acabamento com o fornecedor. */
 const EMOJI_BY_GROUP: Record<string, string> = { [GROUPS[0]]: '🧲', [GROUPS[1]]: '🔑', [GROUPS[2]]: '📅' }
 const SLUG_BY_GROUP: Record<string, string> = { [GROUPS[0]]: 'iman-geladeira', [GROUPS[1]]: 'chaveiro', [GROUPS[2]]: 'iman-calendario' }
-const BUILTIN: Template[] = GROUPS.flatMap(g => FRAME_FORMATS.map(f => ({
-  id: `${SLUG_BY_GROUP[g]}-${f.id}`, name: f.label, group: g, emoji: EMOJI_BY_GROUP[g],
-  w: f.w, h: f.h, shape: f.shape, radius: 0, ...base,
-})))
+const BUILTIN: Template[] = [
+  ...GROUPS.flatMap(g => FRAME_FORMATS.map(f => ({
+    id: `${SLUG_BY_GROUP[g]}-${f.id}`, name: f.label, group: g, emoji: EMOJI_BY_GROUP[g],
+    w: f.w, h: f.h, shape: f.shape, radius: 0, ...base,
+  }))),
+  // Ímãs de geladeira 1, 2, 5 e 6 do documento, usando as medidas 58 e 60 mm
+  { id: 'iman-1-retangular-horizontal', name: '1 · Retangular horizontal 60 × 58 mm', group: GROUPS[0], emoji: '🟩', w: 60, h: 58, shape: 'rect', radius: 0, ...base },
+  { id: 'iman-2-retangular-vertical', name: '2 · Retangular vertical 58 × 60 mm', group: GROUPS[0], emoji: '🟩', w: 58, h: 60, shape: 'rect', radius: 0, ...base },
+  { id: 'iman-5-oval', name: '5 · Oval 60 × 58 mm', group: GROUPS[0], emoji: '🥚', w: 60, h: 58, shape: 'oval', radius: 0, ...base },
+  { id: 'iman-6-coracao', name: '6 · Coração 60 mm', group: GROUPS[0], emoji: '❤️', w: 60, h: 60, shape: 'heart', radius: 0, ...base },
+]
 
 /* ------------------------------------------------------------------ */
 /* Utilitários                                                         */
@@ -167,6 +174,7 @@ function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w:
 function shapePath(shape: Shape, x: number, y: number, w: number, h: number, r: number): Path2D {
   const p = new Path2D()
   if (shape === 'circle') { p.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2); return p }
+  if (shape === 'oval') { p.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); return p }
   if (shape === 'heart') { p.addPath(new Path2D(HEART), new DOMMatrix([w / 100, 0, 0, h / 100, x, y])); return p }
   const rr = shape === 'rounded' ? Math.min(r, w / 2, h / 2) : 0
   p.moveTo(x + rr, y)
@@ -227,6 +235,7 @@ function ShapeEl({ t, fill, stroke, strokeWidth }: { t: Template; fill?: string;
   const { bleed: b, w, h } = t
   if (t.shape === 'circle') return <circle cx={b + w / 2} cy={b + h / 2} r={Math.min(w, h) / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
   if (t.shape === 'heart') return <path d={HEART} transform={`translate(${b} ${b}) scale(${w / 100} ${h / 100})`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
+  if (t.shape === 'oval') return <ellipse cx={b + w / 2} cy={b + h / 2} rx={w / 2} ry={h / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
   return <rect x={b} y={b} width={w} height={h} rx={t.shape === 'rounded' ? t.radius : 0} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
 }
 
@@ -257,6 +266,7 @@ function FrameShape({ shape, w, h, r, fill, stroke, strokeWidth, dash }: {
 }) {
   if (shape === 'circle') return <circle cx={w / 2} cy={h / 2} r={Math.min(w, h) / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} />
   if (shape === 'heart') return <path d={HEART} transform={`scale(${w / 100} ${h / 100})`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} />
+  if (shape === 'oval') return <ellipse cx={w / 2} cy={h / 2} rx={w / 2} ry={h / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} />
   return <rect width={w} height={h} rx={shape === 'rounded' ? Math.min(r, w / 2, h / 2) : 0} fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} />
 }
 
@@ -350,6 +360,7 @@ function TemplateModal({ open, mode, initial, onClose, onApply, onSaveLibrary }:
               <option value="rounded">Retangular arredondado</option>
               <option value="circle">Circular</option>
               <option value="heart">Coração</option>
+              <option value="oval">Oval</option>
             </select>
           </Field>
           {d.shape === 'rounded' && (
