@@ -15,6 +15,41 @@ type Proposal = {
 }
 type ProposalItem = { id: string; description: string; quantity: number; unit_price: number; line_total: number; position: number }
 type Product = { id: string; name: string; category: string; unit_price: number }
+type ProposalTerms = { notes: string | null; terms: string | null; payment_terms: string | null; delivery_days: number | null }
+
+const escHtml = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/** Abre a proposta numa página própria e chama a impressão; em "Guardar como PDF" sai o ficheiro. */
+function printProposal(p: Proposal, items: ProposalItem[], terms: ProposalTerms | null) {
+    const w = window.open('', '_blank')
+    if (!w) throw new Error('O navegador bloqueou a janela de impressão. Permita pop-ups para este site.')
+    const rows = items.map(i => `<tr><td>${escHtml(i.description)}</td><td class="r">${i.quantity}</td><td class="r">${eur(i.unit_price)}</td><td class="r">${eur(i.line_total)}</td></tr>`).join('')
+    const block = (label: string, text?: string | null) => text ? `<h4>${label}</h4><p>${escHtml(text).replace(/\n/g, '<br>')}</p>` : ''
+    w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${escHtml(p.number)}</title><style>
+      body{font-family:Inter,Arial,sans-serif;color:#141922;margin:40px;font-size:13px}
+      header{display:flex;justify-content:space-between;border-bottom:3px solid #10B981;padding-bottom:12px}
+      .brand{font-size:20px;font-weight:700;letter-spacing:.5px}.brand span{color:#10B981}
+      h1{font-size:18px;margin:18px 0 4px}h4{margin:16px 0 4px;color:#202936;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+      table{width:100%;border-collapse:collapse;margin-top:12px}th,td{padding:8px;border-bottom:1px solid #e2e8f0;text-align:left}
+      th{background:#202936;color:#F8FAFC;font-size:11px;text-transform:uppercase}.r{text-align:right}
+      .total{text-align:right;font-size:16px;font-weight:700;margin-top:12px;color:#0f9f6e}
+      .meta{color:#64748b;font-size:12px}
+      @media print{body{margin:18mm}}
+    </style></head><body>
+      <header><div class="brand">MKON <span>DIGITAL</span></div><div class="meta">${escHtml(p.number)}<br>${p.valid_until ? 'Válida até ' + new Date(p.valid_until).toLocaleDateString('pt-PT') : ''}</div></header>
+      <h1>${escHtml(p.title)}</h1>
+      <p class="meta">Cliente: ${escHtml(p.companies?.name ?? '—')}${p.companies?.city ? ' · ' + escHtml(p.companies.city) : ''}</p>
+      <table><thead><tr><th>Descrição</th><th class="r">Qtd.</th><th class="r">Preço unit.</th><th class="r">Total</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4">Preço a definir após análise.</td></tr>'}</tbody></table>
+      <p class="total">Total: ${eur(p.total)}</p>
+      ${block('Prazo de entrega', terms?.delivery_days ? terms.delivery_days + ' dias úteis' : null)}
+      ${block('Pagamento', terms?.payment_terms)}
+      ${block('Condições', terms?.terms)}
+      ${block('Observações', terms?.notes)}
+      <script>window.onload=function(){window.print()}</script>
+    </body></html>`)
+    w.document.close()
+}
 
 const DEMO_PROPOSALS: Proposal[] = [
     { id: 'p1', number: 'PROP-2024-001', title: 'Website Profissional', status: 'enviada', total: 1200, valid_until: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), sent_at: new Date(Date.now() - 3 * 86400000).toISOString(), created_at: new Date(Date.now() - 5 * 86400000).toISOString(), companies: { name: 'Pinturas Alves & Filhos', city: 'Lisboa' }, leads: { stage: 'proposta_enviada' } },
@@ -239,11 +274,13 @@ function CreateProposalModal({ open, onClose, onCreated }: { open: boolean; onCl
 
 function ProposalDetailModal({ proposal: p, onClose, onStatusChange }: { proposal: Proposal | null; onClose: () => void; onStatusChange: (p: Proposal, s: string) => void }) {
     const [items, setItems] = useState<ProposalItem[]>([])
+    const [terms, setTerms] = useState<ProposalTerms | null>(null)
     const demo = isDemoActive()
 
     useEffect(() => {
         if (!p || demo) return
         supabase.from('proposal_items').select('id, description, quantity, unit_price, line_total, position').eq('proposal_id', p.id).order('position').then(({ data }) => setItems((data ?? []) as ProposalItem[]))
+        supabase.from('proposals').select('notes, terms, payment_terms, delivery_days').eq('id', p.id).maybeSingle().then(({ data }) => setTerms((data ?? null) as ProposalTerms | null))
     }, [p, demo])
 
     if (!p) return null
@@ -257,7 +294,8 @@ function ProposalDetailModal({ proposal: p, onClose, onStatusChange }: { proposa
                     <Button onClick={() => { onStatusChange(p, 'aprovada'); onClose() }}><CheckCircle className="h-4 w-4" /> Aprovada</Button>
                     <Button variant="outline" onClick={() => { onStatusChange(p, 'recusada'); onClose() }}><XCircle className="h-4 w-4" /> Recusada</Button>
                 </>}
-                <Button variant="ghost" className="ml-auto" onClick={onClose}>Fechar</Button>
+                <Button variant="outline" className="ml-auto" onClick={() => { try { printProposal(p, items, terms) } catch (e) { alert(e instanceof Error ? e.message : 'Falha ao exportar.') } }}><FileText className="h-4 w-4" /> Exportar PDF</Button>
+                <Button variant="ghost" onClick={onClose}>Fechar</Button>
             </div>
         }>
             <div className="space-y-4">

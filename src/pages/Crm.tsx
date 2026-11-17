@@ -322,6 +322,7 @@ function LeadModal({ lead, onClose, onChanged, onMove }: { lead: LeadRow | null;
   const toast = useToast()
   const [contacts, setContacts] = useState<ContactRow[]>([])
   const [logs, setLogs] = useState<{ id: number; action: string; created_at: string }[]>([])
+  const [hist, setHist] = useState<{ proposals: { id: string; number: string; title: string; status: string; total: number }[]; websites: { id: string; title: string; status: string }[]; meetings: { id: string; title: string; scheduled_at: string; status: string }[] }>({ proposals: [], websites: [], meetings: [] })
   const [form, setForm] = useState({ next_action: '', next_action_at: '', owner_notes: '', estimated_value: '', score: '' })
   const [newContact, setNewContact] = useState({ full_name: '', email: '', phone: '' })
   const [busy, setBusy] = useState(false)
@@ -336,6 +337,14 @@ function LeadModal({ lead, onClose, onChanged, onMove }: { lead: LeadRow | null;
     setConfirmDelete(false)
     supabase.from('contacts').select('id, full_name, role, email, phone, whatsapp, consent_commercial, opted_out').eq('company_id', lead.company_id).order('created_at').then(({ data }) => setContacts((data ?? []) as ContactRow[]))
     supabase.from('activity_logs').select('id, action, created_at').eq('entity_type', 'leads').eq('entity_id', lead.id).order('created_at', { ascending: false }).limit(10).then(({ data }) => setLogs(data ?? []))
+    // Ficha única: tudo o que existe deste cliente, em qualquer módulo
+    Promise.all([
+      supabase.from('proposals').select('id, number, title, status, total').eq('company_id', lead.company_id).order('created_at', { ascending: false }),
+      supabase.from('websites').select('id, title, status').eq('company_id', lead.company_id).order('created_at', { ascending: false }),
+      supabase.from('meetings').select('id, title, scheduled_at, status').eq('company_id', lead.company_id).order('scheduled_at', { ascending: false }),
+    ]).then(([pr, wb, mt]) => setHist({
+      proposals: (pr.data ?? []) as never, websites: (wb.data ?? []) as never, meetings: (mt.data ?? []) as never,
+    }))
   }, [lead])
 
   if (!lead) return null
@@ -437,6 +446,24 @@ function LeadModal({ lead, onClose, onChanged, onMove }: { lead: LeadRow | null;
             <input className="input" placeholder="Email" value={newContact.email} onChange={(e) => setNewContact({ ...newContact, email: e.target.value })} />
             <input className="input" placeholder="Telefone" value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} />
             <Button variant="outline" onClick={addContact}>Adicionar</Button>
+          </div>
+        </div>
+
+        <div>
+          <p className="label">Histórico comercial do cliente</p>
+          <div className="grid gap-3 sm:grid-cols-3 text-xs">
+            <div className="rounded-lg border border-white/[0.07] p-3">
+              <p className="mb-1 text-white/50">Propostas ({hist.proposals.length})</p>
+              {hist.proposals.length === 0 ? <p className="text-white/30">Nenhuma</p> : hist.proposals.map(x => <p key={x.id} className="truncate">{x.number} · {x.title} · {eur(x.total)} <span className="text-white/40">({x.status})</span></p>)}
+            </div>
+            <div className="rounded-lg border border-white/[0.07] p-3">
+              <p className="mb-1 text-white/50">Websites ({hist.websites.length})</p>
+              {hist.websites.length === 0 ? <p className="text-white/30">Nenhum</p> : hist.websites.map(x => <p key={x.id} className="truncate">{x.title} <span className="text-white/40">({x.status})</span></p>)}
+            </div>
+            <div className="rounded-lg border border-white/[0.07] p-3">
+              <p className="mb-1 text-white/50">Reuniões ({hist.meetings.length})</p>
+              {hist.meetings.length === 0 ? <p className="text-white/30">Nenhuma</p> : hist.meetings.map(x => <p key={x.id} className="truncate">{x.title} · {dateTime(x.scheduled_at)} <span className="text-white/40">({x.status})</span></p>)}
+            </div>
           </div>
         </div>
 
