@@ -15,6 +15,7 @@ import Websites from '@/pages/Websites'
 import Propostas from '@/pages/Propostas'
 import Reunioes from '@/pages/Reunioes'
 import NfcPage from '@/pages/Nfc'
+import NfcPublic from '@/pages/NfcPublic'
 import Projetos from '@/pages/Projetos'
 import Financeiro from '@/pages/Financeiro'
 import Relatorios from '@/pages/Relatorios'
@@ -101,6 +102,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/r/:slug" element={<NfcPublic />} />
             <Route element={<Protected />}>
               <Route index element={<Dashboard />} />
               <Route path="crm" element={<Crm />} />
