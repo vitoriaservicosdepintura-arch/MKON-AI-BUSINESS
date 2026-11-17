@@ -712,10 +712,10 @@ async function exportFile(p: Project, o: ExportOpts, fmt: Fmt, base: string) {
 
 /* ---------- Folha de imagens: várias fotos em colunas e linhas ---------- */
 
-type PhotoOpts = { dpi: number; pw: number; ph: number; cw: number; ch: number; margin: number; gap: number; fill: boolean; marks: boolean; circle?: boolean }
+type PhotoOpts = { dpi: number; pw: number; ph: number; cw: number; ch: number; margin: number; gap: number; fill: boolean; marks: boolean; circle?: boolean; layout?: 'stagger9' }
 
-const CELL_PRESETS: { id: string; label: string; w: number; h: number; circle?: boolean }[] = [
-  { id: 'molde-58', label: 'Redondo 58 mm', w: 58, h: 58, circle: true },
+const CELL_PRESETS: { id: string; label: string; w: number; h: number; circle?: boolean; layout?: 'stagger9' }[] = [
+  { id: 'molde-58-9', label: 'Redondo 58 mm · 9 por folha A4', w: 58, h: 58, circle: true, layout: 'stagger9' },
   { id: 'molde-60', label: 'Quadrado 60 mm', w: 60, h: 60 },
   { id: 'custom', label: 'Medida personalizada', w: 0, h: 0 },
 ]
@@ -732,7 +732,50 @@ function photoGrid(o: { pw: number; ph: number; cw: number; ch: number; margin: 
  * as imagens repetem-se. Com "preencher a folha", o espaço entre peças é distribuído
  * para que o conjunto ocupe toda a área útil (margem a margem).
  */
+/** Molde redondo 58 mm, 9 por folha A4: linhas 2–1–2–1–2–1, com o centro alternado. */
+function staggerCells(pw: number, ph: number, d: number, margin: number): [number, number][] {
+  const p = (ph - 2 * margin - d) / 5   // distância vertical entre linhas
+  const dx = 50                          // distância horizontal do centro às laterais
+  const cells: [number, number][] = []
+  for (let r = 0; r < 6; r++) {
+    const cy = margin + d / 2 + r * p
+    if (r % 2 === 0) cells.push([pw / 2 - dx - d / 2, cy - d / 2], [pw / 2 + dx - d / 2, cy - d / 2])
+    else cells.push([pw / 2 - d / 2, cy - d / 2])
+  }
+  return cells
+}
+
+/** Folha com 9 círculos; cada foto preenche o seu círculo (corte circular). */
+function buildStaggerSheet(imgs: HTMLImageElement[], o: PhotoOpts) {
+  if (imgs.length === 0) throw new Error('Selecione pelo menos uma imagem.')
+  const d = 58
+  const cells = staggerCells(o.pw, o.ph, d, o.margin)
+  const k = o.dpi / MM
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(o.pw * k)
+  canvas.height = Math.round(o.ph * k)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas indisponível neste navegador.')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  cells.forEach(([x, y], i) => {
+    const img = imgs[i % imgs.length]
+    const sc = Math.max(d / img.naturalWidth, d / img.naturalHeight)   // preenche o círculo
+    const dw = img.naturalWidth * sc
+    const dh = img.naturalHeight * sc
+    ctx.save()
+    ctx.setTransform(k, 0, 0, k, 0, 0)
+    ctx.beginPath()
+    ctx.arc(x + d / 2, y + d / 2, d / 2, 0, Math.PI * 2)
+    ctx.clip()
+    ctx.drawImage(img, x + (d - dw) / 2, y + (d - dh) / 2, dw, dh)
+    ctx.restore()
+  })
+  return { canvas, pageW: o.pw, pageH: o.ph, cols: 0, rows: 0 }
+}
+
 function buildPhotoSheet(imgs: HTMLImageElement[], o: PhotoOpts) {
+  if (o.layout === 'stagger9') return buildStaggerSheet(imgs, o)
   const { cols, rows } = photoGrid(o)
   if (imgs.length === 0) throw new Error('Selecione pelo menos uma imagem.')
   if (cols < 1 || rows < 1) throw new Error('A peça não cabe neste papel. Escolha um papel maior, uma medida menor ou reduza a margem.')
@@ -834,11 +877,12 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
   const cell = cellId === 'custom' ? { w: cellW, h: cellH } : { w: cellPreset.w, h: cellPreset.h }
   const fmtInfo = FORMATS.find(f => f.id === fmt) ?? FORMATS[0]
 
-  const photoOptsFor = (dpi: number): PhotoOpts => ({ dpi, pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap, fill, marks, circle: !!cellPreset.circle })
+  const photoOptsFor = (dpi: number): PhotoOpts => ({ dpi, pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap, fill, marks, circle: !!cellPreset.circle, layout: cellPreset.layout })
   const grid = kind === 'photos'
     ? photoGrid({ pw: paper.w, ph: paper.h, cw: cell.w, ch: cell.h, margin, gap })
     : gridCount(t, withBleed, paper.w, paper.h, margin, gap)
-  const sheetCount = grid.cols * grid.rows
+  const isStagger = kind === 'photos' && cellPreset.layout === 'stagger9'
+  const sheetCount = isStagger ? 9 : grid.cols * grid.rows
 
   // Libera as imagens da memória ao fechar.
   useEffect(() => () => photosRef.current.forEach(p => URL.revokeObjectURL(p.url)), [])
@@ -1010,7 +1054,7 @@ function ExportOverlay({ project, onClose }: { project: Project; onClose: () => 
               {paperBlock}
               <div className={cn('rounded-lg border p-3 text-xs', sheetCount > 0 ? 'border-white/10 text-white/70' : 'border-red-400/30 text-red-200')}>
                 {sheetCount > 0
-                  ? <>{grid.cols} colunas × {grid.rows} linhas = <strong>{sheetCount} peças</strong> em {paper.label}{kind === 'photos' && photos.length > 0 ? ` · ${photos.length} imagem(ns)` : ''}</>
+                  ? <>{isStagger ? '2–1–2–1–2–1 (9 círculos)' : `${grid.cols} colunas × ${grid.rows} linhas`} = <strong>{sheetCount} peças</strong> em {paper.label}{kind === 'photos' && photos.length > 0 ? ` · ${photos.length} imagem(ns)` : ''}</>
                   : 'A peça não cabe neste papel.'}
               </div>
             </section>
