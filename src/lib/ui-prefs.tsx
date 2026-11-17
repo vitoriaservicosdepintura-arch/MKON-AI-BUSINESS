@@ -2,9 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 /** Preferências de interface do proprietário, guardadas só neste browser. */
 
-export type ThemeId = 'azul' | 'branco' | 'preto' | 'laranja'
+export type ThemeId = 'mkon' | 'azul' | 'branco' | 'preto' | 'laranja'
 
 export const THEMES: { id: ThemeId; label: string; short: string; swatch: string }[] = [
+  { id: 'mkon', label: 'MKON Digital', short: 'MKON', swatch: '#10B981' },
   { id: 'azul', label: 'Azul', short: 'Azul', swatch: '#3B82F6' },
   { id: 'branco', label: 'Branco', short: 'Branco', swatch: '#FFFFFF' },
   { id: 'preto', label: 'Preto fosco', short: 'Preto', swatch: '#0A0A0A' },
@@ -21,6 +22,7 @@ type ChartTheme = {
 const NEUTRALS = ['#8B8F98', '#5C6068', '#3B3F46']
 
 const CHART: Record<ThemeId, ChartTheme> = {
+  mkon: { brand: '#10B981', soft: '#34D399', palette: ['#10B981', '#34D399', '#94A3B8', '#64748B', '#059669', ...NEUTRALS.slice(2)], tip: tip('#141922', 'rgba(255,255,255,.1)', 'rgba(255,255,255,0.04)') },
   azul: { brand: '#3B82F6', soft: '#60A5FA', palette: ['#3B82F6', '#60A5FA', '#8B8F98', '#5C6068', '#1D4ED8', ...NEUTRALS.slice(2)], tip: tip('#161B22', 'rgba(255,255,255,.1)', 'rgba(255,255,255,0.04)') },
   branco: { brand: '#18181B', soft: '#52525B', palette: ['#18181B', '#52525B', '#9CA3AF', '#D1D5DB', '#3F3F46', '#6B7280'], tip: tip('#FFFFFF', 'rgba(17,24,39,.12)', 'rgba(17,24,39,0.05)') },
   preto: { brand: '#E4E4E7', soft: '#FAFAFA', palette: ['#E4E4E7', '#A1A1AA', '#71717A', '#52525B', '#D4D4D8', '#3F3F46'], tip: tip('#141414', 'rgba(255,255,255,.1)', 'rgba(255,255,255,0.04)') },
@@ -37,9 +39,9 @@ const FLOAT_KEY = 'mkon.sidebar.floating'
 function readTheme(): ThemeId {
   try {
     const t = localStorage.getItem(THEME_KEY)
-    if (t === 'azul' || t === 'branco' || t === 'preto' || t === 'laranja') return t
+    if (t === 'mkon' || t === 'azul' || t === 'branco' || t === 'preto' || t === 'laranja') return t
   } catch { /* ignore */ }
-  return 'azul'
+  return 'mkon'
 }
 
 type Ctx = {

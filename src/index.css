@@ -6,7 +6,14 @@
    Valores em "R G B" para funcionarem com opacidade (bg-brand/15).
    fg      = cor de primeiro plano (usada pelas classes white/NN)
    on-brand = cor do texto sobre fundos de destaque               */
+/* MKON Digital: paleta oficial (#090B0F, #141922, #202936, #10B981, #F8FAFC) */
 :root,
+:root[data-theme='mkon'] {
+  color-scheme: dark;
+  --ink: 9 11 15; --graphite: 20 25 34; --slate2: 32 41 54; --snow: 248 250 252;
+  --fg: 248 250 252;
+  --brand: 16 185 129; --brand-soft: 52 211 153; --on-brand: 9 11 15;
+}
 :root[data-theme='azul'] {
   color-scheme: dark;
   --ink: 13 17 23; --graphite: 22 27 34; --slate2: 33 40 50; --snow: 245 247 250;

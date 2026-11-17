@@ -193,7 +193,7 @@ export default function Dashboard() {
     if (demo) return
       ; (async () => {
         const today = new Date().toISOString().slice(0, 10)
-        const [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs] = await Promise.all([
+        const [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs, mt] = await Promise.all([
           supabase.from('companies').select('id', { count: 'exact', head: true }).eq('prospect_dismissed', false),
           supabase.from('leads').select('id, stage, score, opportunity, created_at, next_action, next_action_at, companies(name, city, source_id, prospect_dismissed)'),
           supabase.from('sales').select('amount, cost, sold_at, products(name, category)'),
@@ -209,12 +209,13 @@ export default function Dashboard() {
           supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('status', 'pendente').lt('due_on', today),
           supabase.from('projects').select('id', { count: 'exact', head: true }).neq('stage', 'entregue').lt('due_on', today),
           supabase.from('companies').select('source_id, prospect_dismissed').eq('prospect_dismissed', false),
+          supabase.from('meetings').select('id', { count: 'exact', head: true }).eq('status', 'agendada'),
         ])
-        const firstErr = [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs].find((r) => r.error)
+        const firstErr = [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs, mt].find((r) => r.error)
         if (firstErr?.error) { setError(firstErr.error.message); setLoading(false); return }
         setD({
           companies: c.count ?? 0, nfcSold: nfc.count ?? 0, websitesInProd: prj.count ?? 0,
-          contacts: conv.count ?? 0, replies: msgIn.count ?? 0, meetings: 0,
+          contacts: conv.count ?? 0, replies: msgIn.count ?? 0, meetings: mt.count ?? 0,
           leads: ((l.data ?? []) as unknown as (Lead & { companies: { prospect_dismissed?: boolean } | null })[]).filter((x) => x.companies?.prospect_dismissed !== true) as unknown as Lead[], sales: (s.data ?? []) as unknown as Sale[],
           expenses: (e.data ?? []) as Expense[], proposals: (p.data ?? []) as Proposal[],
           tasks: (t.data ?? []) as unknown as Task[], logs: (lg.data ?? []) as Log[],
@@ -295,7 +296,7 @@ export default function Dashboard() {
         <Kpi loading={loading} icon={Flame} label="Prioritárias" value={m.priority} hint="Pontuação ≥ 75" to="/crm" />
         <Kpi loading={loading} icon={Send} label="Contactos feitos" value={d.contacts} to="/mensagens" />
         <Kpi loading={loading} icon={MessageSquareReply} label="Respostas" value={d.replies} to="/mensagens" />
-        <Kpi loading={loading} icon={CalendarCheck} label="Reuniões" value="—" hint="Agenda: Etapa 3" />
+        <Kpi loading={loading} icon={CalendarCheck} label="Reuniões agendadas" value={d.meetings} to="/reunioes" />
         <Kpi loading={loading} icon={FileText} label="Propostas enviadas" value={m.proposalsSent} to="/propostas" />
         <Kpi loading={loading} icon={Handshake} label="Vendas fechadas" value={m.sold} to="/financeiro" />
         <Kpi loading={loading} icon={Hammer} label="Em produção" value={d.websitesInProd} to="/projetos" />
