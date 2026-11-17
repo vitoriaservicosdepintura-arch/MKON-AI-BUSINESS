@@ -732,16 +732,17 @@ function photoGrid(o: { pw: number; ph: number; cw: number; ch: number; margin: 
  * as imagens repetem-se. Com "preencher a folha", o espaço entre peças é distribuído
  * para que o conjunto ocupe toda a área útil (margem a margem).
  */
-/** Molde redondo 58 mm, 9 por folha A4: linhas 2–1–2–1–2–1, com o centro alternado. */
-function staggerCells(pw: number, ph: number, d: number, margin: number): [number, number][] {
-  const p = (ph - 2 * margin - d) / 5   // distância vertical entre linhas
-  const dx = 50                          // distância horizontal do centro às laterais
+/** Molde redondo 58 mm, 9 por folha A4, medido na referência: laterais em 3 linhas, centro entre elas.
+ *  Coordenadas dos centros em mm (referência A4 210 × 297). */
+const STAGGER_SIDE_X = [105 - 67, 105 + 67]
+const STAGGER_SIDE_Y = [70.3, 144.8, 219.3]
+const STAGGER_CENTRE_Y = [100.5, 174.7, 249.5]
+function staggerCells(_pw: number, _ph: number, d: number, _margin: number): [number, number][] {
   const cells: [number, number][] = []
-  for (let r = 0; r < 6; r++) {
-    const cy = margin + d / 2 + r * p
-    if (r % 2 === 0) cells.push([pw / 2 - dx - d / 2, cy - d / 2], [pw / 2 + dx - d / 2, cy - d / 2])
-    else cells.push([pw / 2 - d / 2, cy - d / 2])
-  }
+  STAGGER_SIDE_Y.forEach((y, i) => {
+    STAGGER_SIDE_X.forEach(x => cells.push([x - d / 2, y - d / 2]))
+    if (i < STAGGER_CENTRE_Y.length) cells.push([105 - d / 2, STAGGER_CENTRE_Y[i] - d / 2])
+  })
   return cells
 }
 
