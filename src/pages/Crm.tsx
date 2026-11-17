@@ -242,7 +242,7 @@ function CalendarView({ rows, onSelect }: { rows: LeadRow[]; onSelect: (l: LeadR
           <Button variant="ghost" size="sm" onClick={() => setCursor(new Date(year, month + 1, 1))} aria-label="Mês seguinte"><ChevronRight className="h-4 w-4" /></Button>
         </div>
       </div>
-      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-lg bg-white/[0.06]">
+      <div className="overflow-x-auto rounded-lg"><div className="grid min-w-[560px] grid-cols-7 gap-px overflow-hidden rounded-lg bg-white/[0.06]">
         {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((d) => <div key={d} className="bg-graphite px-2 py-1.5 text-center text-[10px] uppercase tracking-wider text-white/35">{d}</div>)}
         {cells.map((d, i) => (
           <div key={i} className={cn('min-h-[84px] bg-graphite/90 p-1.5', (d < 1 || d > days) && 'opacity-30')}>
@@ -253,6 +253,7 @@ function CalendarView({ rows, onSelect }: { rows: LeadRow[]; onSelect: (l: LeadR
             </>)}
           </div>
         ))}
+      </div>
       </div>
       <p className="mt-3 text-[11px] text-white/30">Mostra a data da próxima ação de cada lead. {unscheduled > 0 && `${unscheduled} lead(s) sem data agendada.`}</p>
     </Card>

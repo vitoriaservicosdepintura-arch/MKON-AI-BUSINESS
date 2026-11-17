@@ -158,7 +158,7 @@ export function Header({ onMenu, killSwitch, onKillChange, onNotifCount }: {
             {unread > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-brand ring-2 ring-ink" />}
           </button>
           {notifOpen && (
-            <div className="card absolute right-0 mt-2 w-80 animate-scale-in overflow-hidden bg-graphite shadow-2xl">
+            <div className="card absolute right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] animate-scale-in overflow-hidden bg-graphite shadow-2xl">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
                 <span className="text-sm font-semibold">Notificações</span>
                 {unread > 0 && <button onClick={markAllRead} className="text-xs text-brand-soft hover:underline">Marcar como lidas</button>}

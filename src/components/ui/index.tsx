@@ -99,9 +99,9 @@ export function Modal({ open, onClose, title, children, footer, wide }: {
   }, [open, onClose])
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className={cn('card relative z-10 flex max-h-[90vh] w-full animate-scale-in flex-col', wide ? 'max-w-2xl' : 'max-w-lg')}>
+      <div className={cn('card relative z-10 flex max-h-[92dvh] w-full animate-scale-in flex-col rounded-b-none sm:max-h-[90vh] sm:rounded-b-2xl', wide ? 'sm:max-w-2xl' : 'sm:max-w-lg')}>
         <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
           <h2 className="text-sm font-semibold">{title}</h2>
           <button onClick={onClose} aria-label="Fechar" className="rounded-md p-1 text-white/50 hover:bg-white/[0.06] hover:text-snow">
@@ -109,7 +109,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: {
           </button>
         </div>
         <div className="overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">{footer}</div>}
+        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-white/[0.06] px-5 py-3">{footer}</div>}
       </div>
     </div>
   )
