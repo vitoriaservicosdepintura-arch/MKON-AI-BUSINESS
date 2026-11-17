@@ -16,6 +16,7 @@ import Propostas from '@/pages/Propostas'
 import Reunioes from '@/pages/Reunioes'
 import NfcPage from '@/pages/Nfc'
 import NfcPublic from '@/pages/NfcPublic'
+import MkonAi from '@/pages/MkonAi'
 import Projetos from '@/pages/Projetos'
 import Financeiro from '@/pages/Financeiro'
 import Relatorios from '@/pages/Relatorios'
@@ -112,6 +113,7 @@ export default function App() {
               <Route path="mensagens" element={<Mensagens />} />
               <Route path="websites" element={<Websites />} />
               <Route path="reunioes" element={<Reunioes />} />
+              <Route path="mkon-ai" element={<MkonAi />} />
               <Route path="propostas" element={<Propostas />} />
               <Route path="nfc" element={<NfcPage />} />
               <Route path="projetos" element={<Projetos />} />
