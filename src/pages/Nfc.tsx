@@ -10,6 +10,7 @@ import { isDemoActive } from '@/lib/demo'
 type NfcDevice = {
     id: string; slug: string; review_url: string; model: string | null; status: string
     nfc_uid: string | null; manufacturing_cost: number; created_at: string
+    company_name?: string | null; message?: string | null; website_url?: string | null; whatsapp?: string | null; logo_url?: string | null
     customers: { companies: { name: string; city: string | null } | null } | null
 }
 type Supplier = { id: string; name: string; contact_name: string | null; email: string | null; phone: string | null; website: string | null; notes: string | null; created_at: string }
@@ -51,11 +52,24 @@ export default function NfcPage() {
     const [createDeviceOpen, setCreateDeviceOpen] = useState(false)
     const [createSupplierOpen, setCreateSupplierOpen] = useState(false)
     const [statusFilter, setStatusFilter] = useState('')
+    const [destDevice, setDestDevice] = useState<NfcDevice | null>(null)
+    const [reads, setReads] = useState<Record<string, number>>({})
+
+    // Leituras dos últimos 30 dias por plaquinha
+    useEffect(() => {
+        if (demo) return
+        const since = new Date(Date.now() - 30 * 86400000).toISOString()
+        supabase.from('nfc_interactions').select('device_id').gte('occurred_at', since).then(({ data }) => {
+            const m: Record<string, number> = {}
+            for (const r of (data ?? []) as { device_id: string }[]) m[r.device_id] = (m[r.device_id] ?? 0) + 1
+            setReads(m)
+        })
+    }, [demo, devices.length])
 
     const load = useCallback(async () => {
         if (demo) return
         const [dv, sv, od] = await Promise.all([
-            supabase.from('nfc_devices').select('id, slug, review_url, model, status, nfc_uid, manufacturing_cost, created_at, customers(companies(name, city))').order('created_at', { ascending: false }),
+            supabase.from('nfc_devices').select('id, slug, review_url, model, status, nfc_uid, manufacturing_cost, created_at, company_name, message, website_url, whatsapp, logo_url, customers(companies(name, city))').order('created_at', { ascending: false }),
             supabase.from('suppliers').select('*').order('name'),
             supabase.from('orders').select('id, kind, quantity, unit_price, total, status, ordered_at, delivered_at, tracking_code, customers(companies(name)), suppliers(name), products(name)').order('ordered_at', { ascending: false }).limit(50),
         ])
@@ -150,6 +164,8 @@ export default function NfcPage() {
                                             </div>
                                         </div>
                                         <div className="flex shrink-0 items-center gap-2">
+                                            <span className="text-[11px] text-white/40">{reads[d.id] ?? 0} leituras (30 dias)</span>
+                                            <Button size="sm" variant="outline" onClick={() => setDestDevice(d)}>Página e destinos</Button>
                                             <a href={d.review_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[11px] text-brand-soft hover:underline"><ExternalLink className="h-3 w-3" /> Review URL</a>
                                             {d.status === 'vendida' && <Button size="sm" variant="outline" onClick={() => changeDeviceStatus(d, 'entregue')}>Marcar entregue</Button>}
                                             {d.status === 'entregue' && <Button size="sm" variant="outline" onClick={() => changeDeviceStatus(d, 'ativa')}>Marcar ativa</Button>}
@@ -225,6 +241,7 @@ export default function NfcPage() {
             )}
 
             <CreateDeviceModal open={createDeviceOpen} onClose={() => setCreateDeviceOpen(false)} onCreated={load} />
+            <DestinationsModal device={destDevice} onClose={() => setDestDevice(null)} onSaved={load} />
             <CreateSupplierModal open={createSupplierOpen} onClose={() => setCreateSupplierOpen(false)} onCreated={load} />
         </>
     )
@@ -257,6 +274,49 @@ function CreateDeviceModal({ open, onClose, onCreated }: { open: boolean; onClos
                 <Field label="URL de avaliação Google *"><input required className="input" value={f.review_url} onChange={set('review_url')} /></Field>
                 <Field label="Modelo"><select className="input" value={f.model} onChange={set('model')}>{['Cartão PVC Premium', 'Plaquinha Acrílico', 'Plaquinha Metal', 'Autocolante NFC'].map(m => <option key={m}>{m}</option>)}</select></Field>
                 <Field label="Custo de produção (€)"><input className="input" type="number" min="0" step="0.01" value={f.manufacturing_cost} onChange={set('manufacturing_cost')} /></Field>
+            </form>
+        </Modal>
+    )
+}
+
+/** Página pública e destinos da plaquinha. Alterar aqui não exige regravar a tag: a URL /r/{slug} é a mesma. */
+function DestinationsModal({ device, onClose, onSaved }: { device: NfcDevice | null; onClose: () => void; onSaved: () => void }) {
+    const toast = useToast()
+    const [f, setF] = useState({ company_name: '', message: '', website_url: '', whatsapp: '', logo_url: '', review_url: '' })
+    const [busy, setBusy] = useState(false)
+    useEffect(() => {
+        if (device) setF({ company_name: device.company_name ?? '', message: device.message ?? '', website_url: device.website_url ?? '', whatsapp: device.whatsapp ?? '', logo_url: device.logo_url ?? '', review_url: device.review_url })
+    }, [device])
+    if (!device) return null
+    const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF(s => ({ ...s, [k]: e.target.value }))
+
+    const save = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!f.review_url.startsWith('https://')) return toast.push('error', 'O link de avaliação deve começar por https://')
+        if (f.website_url && !f.website_url.startsWith('https://')) return toast.push('error', 'O website deve começar por https://')
+        setBusy(true)
+        const { error } = await supabase.from('nfc_devices').update({
+            company_name: f.company_name.trim() || null, message: f.message.trim() || null,
+            website_url: f.website_url.trim() || null, whatsapp: f.whatsapp.replace(/\D/g, '') || null,
+            logo_url: f.logo_url.trim() || null, review_url: f.review_url.trim(),
+        }).eq('id', device.id)
+        setBusy(false)
+        if (error) return toast.push('error', error.message)
+        await logActivity('nfc.destinations_updated', 'nfc_devices', device.id)
+        toast.push('success', 'Página atualizada. Não é preciso regravar a tag.')
+        onSaved(); onClose()
+    }
+    return (
+        <Modal open onClose={onClose} title={`Página /r/${device.slug}`} footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" form="dest-form" loading={busy}>Guardar</Button></>}>
+            <form id="dest-form" onSubmit={save} className="space-y-4">
+                <Field label="Nome da empresa"><input className="input" value={f.company_name} onChange={set('company_name')} /></Field>
+                <Field label="Mensagem"><textarea rows={2} className="input" value={f.message} onChange={set('message')} /></Field>
+                <Field label="Link de avaliação Google *"><input className="input" value={f.review_url} onChange={set('review_url')} /></Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="WhatsApp (com indicativo)" hint="Ex.: 351912345678"><input className="input" value={f.whatsapp} onChange={set('whatsapp')} /></Field>
+                    <Field label="Website (https://)"><input className="input" value={f.website_url} onChange={set('website_url')} /></Field>
+                </div>
+                <Field label="Logotipo (URL https://)"><input className="input" value={f.logo_url} onChange={set('logo_url')} /></Field>
             </form>
         </Modal>
     )
