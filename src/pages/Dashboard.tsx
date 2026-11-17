@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   Building2, UserPlus, BadgeCheck, Flame, Send, MessageSquareReply, CalendarCheck, FileText, Handshake, Hammer,
-  Nfc, Euro, Receipt, TrendingUp, Search, Globe, Plus, AlertTriangle, Sparkles, Activity, BarChart3,
+  Nfc, Gift, Target, Euro, Receipt, TrendingUp, Search, Globe, Plus, AlertTriangle, Sparkles, Activity, BarChart3,
   FlaskConical, KeyRound, Plug,
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -175,14 +175,14 @@ export default function Dashboard() {
   const [d, setD] = useState(() => {
     if (demo) return {
       companies: DEMO.companies, nfcSold: DEMO.nfcSold, websitesInProd: DEMO.websitesInProd,
-      contacts: DEMO.contacts, replies: DEMO.replies, meetings: 0,
+      contacts: DEMO.contacts, replies: DEMO.replies, meetings: 0, pendingFees: 0, pendingFeesAmount: 0, gifOpen: 0, goal: 500,
       leads: DEMO.leads as Lead[], sales: DEMO.sales as Sale[], expenses: DEMO.expenses as Expense[],
       proposals: DEMO.proposals as Proposal[], tasks: DEMO.tasks as Task[],
       logs: DEMO.logs as Log[], sources: DEMO.sources,
       companySources: DEMO.companySources, overdueTx: DEMO.overdueTx, overdueProjects: DEMO.overdueProjects,
     }
     return {
-      companies: 0, nfcSold: 0, websitesInProd: 0, contacts: 0, replies: 0, meetings: 0,
+      companies: 0, nfcSold: 0, websitesInProd: 0, contacts: 0, replies: 0, meetings: 0, pendingFees: 0, pendingFeesAmount: 0, gifOpen: 0, goal: 500,
       leads: [] as Lead[], sales: [] as Sale[], expenses: [] as Expense[], proposals: [] as Proposal[], tasks: [] as Task[],
       logs: [] as Log[], sources: [] as { id: string; name: string }[], companySources: [] as { source_id: string | null }[],
       overdueTx: 0, overdueProjects: 0,
@@ -193,7 +193,7 @@ export default function Dashboard() {
     if (demo) return
       ; (async () => {
         const today = new Date().toISOString().slice(0, 10)
-        const [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs, mt] = await Promise.all([
+        const [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs, mt, pend, gifOpen, meta] = await Promise.all([
           supabase.from('companies').select('id', { count: 'exact', head: true }).eq('prospect_dismissed', false),
           supabase.from('leads').select('id, stage, score, opportunity, created_at, next_action, next_action_at, companies(name, city, source_id, prospect_dismissed)'),
           supabase.from('sales').select('amount, cost, sold_at, products(name, category)'),
@@ -210,12 +210,19 @@ export default function Dashboard() {
           supabase.from('projects').select('id', { count: 'exact', head: true }).neq('stage', 'entregue').lt('due_on', today),
           supabase.from('companies').select('source_id, prospect_dismissed').eq('prospect_dismissed', false),
           supabase.from('meetings').select('id', { count: 'exact', head: true }).eq('status', 'agendada'),
+          supabase.from('transactions').select('amount').eq('type', 'receita').eq('status', 'pendente'),
+          supabase.from('gif_orders').select('id', { count: 'exact', head: true }).in('status', ['novo_pedido', 'aguardando_pagamento', 'pagamento_confirmado', 'aguardando_personalizacao', 'em_producao', 'controle_qualidade', 'pronto_envio']),
+          supabase.from('system_settings').select('value').eq('key', 'meta_faturamento_mensal').maybeSingle(),
         ])
-        const firstErr = [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs, mt].find((r) => r.error)
+        const firstErr = [c, l, s, e, p, t, lg, src, nfc, prj, conv, msgIn, overdueTx, overdueProj, cs, mt, pend, gifOpen, meta].find((r) => r.error)
         if (firstErr?.error) { setError(firstErr.error.message); setLoading(false); return }
         setD({
           companies: c.count ?? 0, nfcSold: nfc.count ?? 0, websitesInProd: prj.count ?? 0,
           contacts: conv.count ?? 0, replies: msgIn.count ?? 0, meetings: mt.count ?? 0,
+          pendingFees: (pend.data ?? []).length,
+          pendingFeesAmount: ((pend.data ?? []) as { amount: number }[]).reduce((a, x) => a + Number(x.amount), 0),
+          gifOpen: gifOpen.count ?? 0,
+          goal: Number((meta.data as { value?: unknown } | null)?.value ?? 500) || 500,
           leads: ((l.data ?? []) as unknown as (Lead & { companies: { prospect_dismissed?: boolean } | null })[]).filter((x) => x.companies?.prospect_dismissed !== true) as unknown as Lead[], sales: (s.data ?? []) as unknown as Sale[],
           expenses: (e.data ?? []) as Expense[], proposals: (p.data ?? []) as Proposal[],
           tasks: (t.data ?? []) as unknown as Task[], logs: (lg.data ?? []) as Log[],
@@ -226,6 +233,17 @@ export default function Dashboard() {
         setLoading(false)
       })()
   }, [demo])
+
+  /** Meta mensal de faturamento, guardada em system_settings e editável pelo administrador. */
+  const editGoal = async () => {
+    const raw = window.prompt('Meta mensal de faturamento (€):', String(d.goal))
+    if (raw === null) return
+    const n = Number(raw.replace(',', '.'))
+    if (!Number.isFinite(n) || n <= 0) return
+    const { error } = await supabase.from('system_settings').upsert({ key: 'meta_faturamento_mensal', value: n, updated_at: new Date().toISOString() })
+    if (error) return window.alert(error.message)
+    setD(x => ({ ...x, goal: n }))
+  }
 
   const m = useMemo(() => {
     const months = lastMonths(6)
@@ -275,7 +293,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <PageHeader title="Dashboard" description={demo ? 'Visualização com dados fictícios — modo demonstração ativo.' : 'Inteligência comercial em tempo real. Todos os números vêm da base de dados.'} />
+      <PageHeader title="Dashboard" actions={<Button variant="ghost" onClick={editGoal}><Target className="h-4 w-4" /> Meta mensal: {eur(d.goal)}</Button>} description={demo ? 'Visualização com dados fictícios — modo demonstração ativo.' : 'Inteligência comercial em tempo real. Todos os números vêm da base de dados.'} />
 
       <ConfigBanner />
 
@@ -301,6 +319,8 @@ export default function Dashboard() {
         <Kpi loading={loading} icon={Handshake} label="Vendas fechadas" value={m.sold} to="/financeiro" />
         <Kpi loading={loading} icon={Hammer} label="Em produção" value={d.websitesInProd} to="/projetos" />
         <Kpi loading={loading} icon={Nfc} label="NFC vendidas" value={d.nfcSold} to="/nfc" />
+        <Kpi loading={loading} icon={Receipt} label="Mensalidades pendentes" value={d.pendingFees} hint={eur(d.pendingFeesAmount)} to="/financeiro" />
+        <Kpi loading={loading} icon={Gift} label="Encomendas GIF em aberto" value={d.gifOpen} to="/loja-gifs" />
         <Kpi loading={loading} icon={Euro} label="Faturamento mês" value={eur(m.revenue)} hint="Só vendas registadas" to="/financeiro" />
         <Kpi loading={loading} icon={Receipt} label="Despesas mês" value={eur(m.expenses)} to="/financeiro" />
         <Kpi loading={loading} icon={TrendingUp} label="Lucro estimado" value={eur(m.profit)} hint="Antes de impostos" to="/financeiro" />
