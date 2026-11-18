@@ -103,11 +103,11 @@ export default function Websites() {
                     </div>
 
                     {loading ? (
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map(i => <Skeleton key={i} className="h-40" />)}</div>
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map(i => <Skeleton key={i} className="h-40" />)}</div>
                     ) : filtered.length === 0 ? (
                         <Card><EmptyState icon={<Globe className="h-5 w-5" />} title="Nenhum website" description="Crie o primeiro website para um cliente." action={<Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> Novo website</Button>} /></Card>
                     ) : (
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {filtered.map(w => {
                                 const cfg = statusCfg[w.status] ?? statusCfg.rascunho
                                 const Icon = cfg.icon
@@ -151,7 +151,7 @@ export default function Websites() {
             )}
 
             {tab === 'templates' && (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {templates.map(t => (
                         <Card key={t.id} className="p-4">
                             <div className="flex items-center gap-2 mb-2">
@@ -211,7 +211,7 @@ function WebsiteDetailModal({ website: w, onClose, onStatusChange }: { website: 
         <Modal open onClose={onClose} title={w.title} wide footer={<Button variant="ghost" onClick={onClose}>Fechar</Button>}>
             <div className="space-y-4">
                 <div className="flex flex-wrap gap-2"><Badge tone={cfg.tone}>{cfg.label}</Badge>{w.website_templates && <Badge>{w.website_templates.name}</Badge>}</div>
-                <div className="grid gap-3 sm:grid-cols-2 text-sm">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">
                     {w.companies && <div><p className="label">Cliente</p><p className="text-white/70">{w.companies.name} {w.companies.city ? `(${w.companies.city})` : ''}</p></div>}
                     {w.preview_url && <div><p className="label">Link de preview</p><a href={w.preview_url} target="_blank" rel="noreferrer" className="text-brand-soft hover:underline">{w.preview_url}</a></div>}
                     {w.published_url && <div><p className="label">URL publicado</p><a href={w.published_url} target="_blank" rel="noreferrer" className="text-green-400 hover:underline">{w.published_url}</a></div>}
