@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Radar, Inbox, Kanban, Globe, FileText, Nfc, Wallet,
-  FolderKanban, BarChart3, ShieldCheck, ImagePlus, CalendarCheck, Bot, Users, type LucideIcon,
+  FolderKanban, BarChart3, ShieldCheck, ImagePlus, CalendarCheck, Bot, Users, Building2, type LucideIcon,
 } from 'lucide-react'
 
 export type NavItem = {
@@ -20,6 +20,7 @@ export const NAV: NavItem[] = [
   { to: '/reunioes', label: 'Reuniões', icon: CalendarCheck, stage: 1, description: 'Agendamento de reuniões com clientes e fecho de pedidos' },
   { to: '/mkon-ai', label: 'MKON AI', icon: Bot, stage: 1, description: 'Configuração da IA, consumo e aprovação de textos' },
   { to: '/agentes-autonomos', label: 'Agentes autónomos', icon: Users, stage: 1, description: 'Equipa de agentes que capta, analisa, desenha e propõe, com aprovação sua' },
+  { to: '/imoveis-tour', label: 'Imóveis tour 3D', icon: Building2, stage: 1, description: 'Página de venda do tour 3D para corretores de imóveis' },
   { to: '/propostas', label: 'Propostas', icon: FileText, stage: 1, description: 'Orçamentos e propostas comerciais' },
   { to: '/nfc', label: 'NFC', icon: Nfc, stage: 1, description: 'Plaquinhas NFC, encomendas e fornecedores' },
   { to: '/loja-gifs', label: 'Loja de GIFs', icon: ImagePlus, stage: 1, description: 'Venda de ímanes personalizados e GIFs animados' },
