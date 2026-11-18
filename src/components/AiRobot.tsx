@@ -14,7 +14,7 @@ const greetAndAsk = () => {
 }
 
 /** Agente no servidor (Edge Function mkon-agent): usa a sessão de login do proprietário. */
-type AgentAction = { type: 'navigate'; path: string } | { type: 'show_search'; query: string; messages: string[]; places: unknown[] }
+type AgentAction = { type: 'navigate'; path: string } | { type: 'show_search'; query: string; messages: string[]; places: unknown[] } | { type: 'prepare_progress'; kind: string; items: { name: string; status: string; draft_id?: string }[] }
 
 async function callAgent(messages: { role: 'user' | 'assistant'; content: string }[]): Promise<{ reply: string; tools_used: string[]; actions?: AgentAction[] }> {
     const { data: { session } } = await supabase.auth.getSession()
@@ -213,6 +213,11 @@ export function AiRobot() {
             // Ações devolvidas pelo agente (ex.: abrir uma página do menu)
             for (const a of r.actions ?? []) {
                 if (a.type === 'navigate' && a.path.startsWith('/')) navigate(a.path)
+                if (a.type === 'prepare_progress') {
+                    try { sessionStorage.setItem('mkon.lucy.work', JSON.stringify(a)) } catch { /* ignore */ }
+                    setOpen(false)
+                    navigate('/mkon-ai')
+                }
                 if (a.type === 'show_search') {
                     // A Lucy fecha o chat e mostra o trabalho no ecrã de Prospeção
                     try { sessionStorage.setItem('mkon.lucy.search', JSON.stringify(a)) } catch { /* ignore */ }

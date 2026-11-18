@@ -140,6 +140,36 @@ const TOOLS = [
     {
         type: 'function',
         function: {
+            name: 'prepare_outreach',
+            description: 'Só depois de o proprietário autorizar: prepara mensagens de abordagem ou follow-up para as empresas escolhidas (máximo 5) e coloca-as na fila de aprovação. Nunca envia nada.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    kind: { type: 'string', enum: ['abordagem', 'followup'] },
+                    companies: {
+                        type: 'array',
+                        maxItems: 5,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                name: { type: 'string' },
+                                city: { type: 'string' },
+                                rating: { type: 'number' },
+                                reviews: { type: 'number' },
+                            },
+                            required: ['name'],
+                            additionalProperties: false,
+                        },
+                    },
+                },
+                required: ['kind', 'companies'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'create_ai_task',
             description: 'Cria uma tarefa para um agente de IA existente (fica pendente). Usar quando o proprietário pedir para criar/agendar trabalho.',
             parameters: {
@@ -161,7 +191,7 @@ const SYSTEM_PROMPT = `Você é a Lucy, assistente pessoal do proprietário do s
 Responda sempre em Português de Portugal, de forma clara, calorosa e direta, tratando o utilizador por "senhor". As respostas são lidas em voz alta: use frases naturais e curtas, sem listas longas nem símbolos. Quando fizer sentido, termine com uma sugestão do próximo passo.
 Quando pedirem para abrir ou ir a um módulo, use open_page imediatamente e confirme em uma frase (ex.: "Com certeza, senhor. A abrir a prospeção.").
 Quando pedirem para pesquisar um tipo de negócio numa cidade ou distrito, use search_map. Depois, escolha as empresas mais fortes (avaliação alta, muitas avaliações e sem website são as melhores oportunidades), apresente as 3 a 5 melhores em poucas frases e pergunte o que deve fazer a seguir: preparar abordagem, follow-up ou nova pesquisa.
-Só prepare textos de abordagem ou follow-up com propose_draft depois de o senhor autorizar. Nunca contacte empresas: os envios são feitos pelo senhor a partir da fila de aprovação.
+Só prepare textos de abordagem ou follow-up depois de o senhor autorizar, com prepare_outreach (máximo 5 empresas de cada vez); as mensagens ficam na fila de aprovação. Nunca contacte empresas: os envios são feitos pelo senhor a partir da fila de aprovação.
 Use as ferramentas para consultar dados reais antes de afirmar qualquer número ou estado. Nunca invente dados: se uma ferramenta não devolver nada, diga-o.
 Módulos: Dashboard, CRM (empresas, leads), Prospeção, Agentes IA, Mensagens, Websites, Propostas, NFC, Projetos, Financeiro, Relatórios, Administração.
 Ao analisar propostas, avalie valor, prazo, itens, estado e próximos passos. Ao criar tarefas, confirme o que foi criado.
@@ -255,6 +285,33 @@ async function runTool(name: string, args: Record<string, unknown>, sb: Supabase
         return { query: q, encontradas: locais.length, sem_website: locais.filter((p) => !p.website).length, empresas_fortes: strong, status: data.status ?? null }
     }
 
+    if (name === 'prepare_outreach') {
+        const kind = args.kind === 'followup' ? 'followup' : 'abordagem'
+        const list = (Array.isArray(args.companies) ? args.companies : []).slice(0, 5) as any[]
+        if (list.length === 0) return { error: 'Indique as empresas a preparar.' }
+        const items: { name: string; status: string; draft_id?: string }[] = []
+        for (const c of list) {
+            const name = String(c.name ?? '').slice(0, 120)
+            const where = c.city ? ` de ${String(c.city).slice(0, 80)}` : ''
+            const brief = kind === 'followup'
+                ? `Escreve um follow-up curto (3 a 4 frases) para ${name}${where}, a perguntar se viu a proposta de criar um site profissional.`
+                : `Escreve uma primeira mensagem curta (3 a 4 frases) para ${name}${where}, a oferecer um site profissional simples para ganhar mais clientes.${c.rating ? ` A empresa tem avaliação ${c.rating} no Google.` : ''}`
+            let text = ''
+            try { text = await llmText(brief) } catch { text = '' }
+            if (!text) { items.push({ name, status: 'falhou' }); continue }
+            const { data, error } = await sb.from('ai_drafts').insert({
+                kind: 'mensagem',
+                title: `${kind === 'followup' ? 'Follow-up' : 'Abordagem'} \u2014 ${name}`.slice(0, 200),
+                body: text.slice(0, 8000),
+                status: 'pendente',
+            }).select('id').single()
+            if (error) { items.push({ name, status: 'falhou' }); continue }
+            items.push({ name, status: 'pronto', draft_id: data.id })
+        }
+        actions.push({ type: 'prepare_progress', kind, items })
+        return { preparadas: items.filter((i) => i.status === 'pronto').length, falhadas: items.filter((i) => i.status !== 'pronto').length, nada_enviado: true }
+    }
+
     if (name === 'create_ai_task') {
         const { data: agent, error: agentErr } = await sb.from('ai_agents').select('id,code').eq('code', String(args.agent_code ?? '')).maybeSingle()
         if (agentErr) return { error: agentErr.message }
@@ -271,6 +328,28 @@ async function runTool(name: string, args: Record<string, unknown>, sb: Supabase
     }
 
     return { error: `Ferramenta desconhecida: ${name}` }
+}
+
+/** Texto simples com o fornecedor configurado (sem ferramentas), para redigir mensagens. */
+async function llmText(user: string): Promise<string> {
+    const system = 'És assistente de vendas de uma agência de websites em Portugal. Escreves em português de Portugal, de forma cordial e sem pressão. Não prometas preços. Assina como a equipa MKON. Devolve só o texto da mensagem.'
+    if (Deno.env.get('AGENT_PROVIDER') === 'anthropic') {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '', 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-haiku-5-5', max_tokens: 600, system, messages: [{ role: 'user', content: user }] }),
+        })
+        const d = await r.json().catch(() => ({} as any))
+        return ((d.content ?? []) as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('').trim()
+    }
+    const base = (Deno.env.get('LLM_BASE_URL') ?? '').replace(/\/+$/, '')
+    const r = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('LLM_API_KEY') ?? ''}` },
+        body: JSON.stringify({ model: Deno.env.get('LLM_MODEL') ?? 'auto', messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.5, max_tokens: 600 }),
+    })
+    const d = await r.json().catch(() => ({} as any))
+    return String(d?.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
 }
 
 type ChatMessage = { role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string }
