@@ -30,7 +30,7 @@ export function AppShell() {
   const onNotifCount = useCallback((n: number) => setNotifCount(n), [])
 
   return (
-    <div className="min-h-full">
+    <div className="min-h-full overflow-x-clip">
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} badges={{ '/': notifCount }} />
       <div className={cn('flex min-h-screen flex-col transition-[padding] duration-300 ease-[cubic-bezier(.4,0,.2,1)]', floating ? 'lg:pl-0' : collapsed ? 'lg:pl-[68px]' : 'lg:pl-60')}>
         <Header onMenu={() => setMobileOpen(true)} killSwitch={kill} onKillChange={setKill} onNotifCount={onNotifCount} />
@@ -39,7 +39,7 @@ export function AppShell() {
             <OctagonAlert className="h-4 w-4" /> Botão de emergência ativo: todas as atividades automáticas e envios estão parados.
           </div>
         )}
-        <main key={location.pathname} className="mx-auto w-full max-w-[1400px] flex-1 animate-fade-up px-4 py-6 md:px-6">
+        <main key={location.pathname} className="mx-auto w-full min-w-0 max-w-[1400px] flex-1 animate-fade-up px-4 py-6 md:px-6">
           <Outlet />
         </main>
       </div>

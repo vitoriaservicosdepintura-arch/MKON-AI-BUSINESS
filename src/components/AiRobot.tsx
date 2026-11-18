@@ -293,7 +293,7 @@ export function AiRobot() {
             <div className={cn(
                 'fixed bottom-6 right-6 z-50 flex flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-graphite/95 shadow-[0_25px_80px_rgba(0,0,0,0.7)] backdrop-blur-xl transition-all duration-300',
                 open ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none',
-                minimized ? 'h-20 w-72' : 'h-[580px] w-[380px]'
+                minimized ? 'h-20 w-[min(18rem,calc(100vw-2rem))]' : 'h-[min(580px,calc(100dvh-7rem))] w-[min(380px,calc(100vw-2rem))]'
             )}>
                 {/* Header */}
                 <div className="flex items-center gap-3 border-b border-white/[0.07] bg-white/[0.03] px-4 py-3">
