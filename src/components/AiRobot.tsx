@@ -10,7 +10,7 @@ const greetAndAsk = () => {
     const url = import.meta.env.VITE_SUPABASE_URL as string
     const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
     const getToken = async () => (await supabase.auth.getSession()).data.session?.access_token ?? null
-    speakNatural(`${greetingForNow()}, senhor. O que deseja que eu faça?`, getToken, url, anonKey)
+    speakNatural(`${greetingForNow()}, senhor. Lucy ao seu dispor. O que deseja que eu faça?`, getToken, url, anonKey)
 }
 
 /** Agente no servidor (Edge Function mkon-agent): usa a sessão de login do proprietário. */
@@ -181,7 +181,7 @@ export function AiRobot() {
             setMessages([{
                 id: 'welcome',
                 role: 'assistant',
-                content: `Olá! Sou o MKON Bot 🤖\n\n${apiStatus}\n\nComo posso ajudar? Pode pedir-me para:\n• Analisar dados do negócio\n• Criar textos e propostas\n• Explicar como usar o sistema\n• Ajudar com código ou SQL\n• Qualquer tarefa que precise!`,
+                content: `Olá, senhor. Sou a Lucy, a sua assistente.\n\n${apiStatus}\n\nPosso fazer isto por si:\n• Abrir qualquer módulo: diga, por exemplo, «abra a prospeção»\n• Analisar o negócio com os dados reais\n• Preparar mensagens e propostas para aprovação\n• Criar tarefas para os agentes\n\nO que deseja que eu faça?`,
                 ts: Date.now(),
             }])
         }
@@ -214,6 +214,9 @@ export function AiRobot() {
             for (const a of r.actions ?? []) {
                 if (a.type === 'navigate' && a.path.startsWith('/')) navigate(a.path)
             }
+            // A Lucy responde também em voz alta
+            speakNatural(r.reply, async () => (await supabase.auth.getSession()).data.session?.access_token ?? null,
+                import.meta.env.VITE_SUPABASE_URL as string, import.meta.env.VITE_SUPABASE_ANON_KEY as string)
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Erro desconhecido.')
         } finally {
@@ -264,10 +267,10 @@ export function AiRobot() {
                         'fixed bottom-6 right-6 z-40 flex flex-col items-center gap-1 rounded-2xl border border-white/10 bg-graphite/95 p-3 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:border-brand/40',
                         open && !minimized ? 'opacity-0 pointer-events-none scale-75' : 'opacity-100'
                     )}
-                    title="Abrir MKON Bot"
+                    title="Abrir Lucy"
                 >
                     <RobotFace mouseX={mousePos.x} mouseY={mousePos.y} isThinking={false} isOpen={false} />
-                    <span className="text-[10px] font-medium tracking-wide text-brand-soft">MKON Bot</span>
+                    <span className="text-[10px] font-medium tracking-wide text-brand-soft">Lucy</span>
                     {isAiOnline && <div className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-graphite bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)] animate-pulse" />}
                 </button>
             )}
@@ -281,7 +284,7 @@ export function AiRobot() {
                         ? 'right-16 border-cyan-400/50 bg-cyan-400/20 text-cyan-300 hover:border-cyan-400/70 hover:bg-cyan-400/30' 
                         : 'right-6 border-cyan-400/50 bg-cyan-400/20 text-cyan-300 hover:border-cyan-400/70 hover:bg-cyan-400/30'
                 )}
-                title={visible ? 'Esconder MKON Bot' : 'Mostrar MKON Bot'}
+                title={visible ? 'Esconder Lucy' : 'Mostrar Lucy'}
             >
                 {visible ? <X className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
             </button>
@@ -299,13 +302,13 @@ export function AiRobot() {
                     </div>
                     {!minimized && (
                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold">MKON Bot</p>
+                            <p className="text-sm font-semibold">Lucy</p>
                             <p className="text-[10px] text-white/40 truncate">
                                 {thinking ? 'A pensar…' : anyReady ? 'Agente MKON · dados reais' : 'Supabase não configurado'}
                             </p>
                         </div>
                     )}
-                    {minimized && <span className="flex-1 text-sm font-semibold">MKON Bot</span>}
+                    {minimized && <span className="flex-1 text-sm font-semibold">Lucy</span>}
                     <div className="flex items-center gap-1">
                         <button onClick={() => setMinimized((v) => !v)} className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white" title={minimized ? 'Expandir' : 'Minimizar'}>
                             {minimized ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
