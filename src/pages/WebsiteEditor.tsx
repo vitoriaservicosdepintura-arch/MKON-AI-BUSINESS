@@ -8,7 +8,7 @@ import { SiteView, type SiteContent, type SiteItem, type SiteSection, type SiteS
 
 type Row = { id: string; title: string; status: string; slug: string | null; content: SiteContent; theme: Partial<SiteTheme> }
 
-const RESERVED = ['crm', 'admin', 'prospeccao', 'agentes', 'agentes-autonomos', 'mensagens', 'websites', 'reunioes', 'mkon-ai', 'propostas', 'nfc', 'projetos', 'financeiro', 'relatorios', 'loja-gifs', 'login', 'r', 's', 'api', 'assets']
+const RESERVED = ['crm', 'admin', 'prospeccao', 'agentes', 'agentes-autonomos', 'imoveis-tour', 'mensagens', 'websites', 'reunioes', 'mkon-ai', 'propostas', 'nfc', 'projetos', 'financeiro', 'relatorios', 'loja-gifs', 'login', 'r', 's', 'api', 'assets']
 const DEFAULT_THEME: SiteTheme = { primary: '#2563EB', accent: '#0EA5E9', bg: '#FFFFFF', text: '#0F172A' }
 const SECTION_NAMES: Record<SiteSectionType, string> = { services: 'Serviços', about: 'Sobre nós', gallery: 'Galeria', stats: 'Números', process: 'Processo', testimonials: 'Testemunhos' }
 const ITEM_LABELS: Partial<Record<SiteSectionType, [string, string]>> = {

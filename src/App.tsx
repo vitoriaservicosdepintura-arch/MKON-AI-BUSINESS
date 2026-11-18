@@ -37,6 +37,7 @@ import { activateApiKeyFromUrl } from '@/lib/apikeys'
 import { UiPrefsProvider } from '@/lib/ui-prefs'
 import PublicSite from '@/pages/PublicSite'
 import AgentesAutonomos from '@/pages/AgentesAutonomos'
+import ImoveisTour from '@/pages/ImoveisTour'
 import WebsiteEditor from '@/pages/WebsiteEditor'
 
 function UrlKeyActivator() {
@@ -120,6 +121,7 @@ export default function App() {
               <Route path="reunioes" element={<Reunioes />} />
               <Route path="mkon-ai" element={<MkonAi />} />
               <Route path="agentes-autonomos" element={<AgentesAutonomos />} />
+              <Route path="imoveis-tour" element={<ImoveisTour />} />
               <Route path="propostas" element={<Propostas />} />
               <Route path="nfc" element={<NfcPage />} />
               <Route path="projetos" element={<Projetos />} />
