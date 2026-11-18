@@ -12,6 +12,7 @@
 // Limite: no máximo 4 empresas por execução (tempo da Edge Function).
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { buildSite } from './site.ts'
 
 const CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -82,7 +83,7 @@ Deno.serve(async (req) => {
     const llm = (system: string, user: string) => callLLM(system, user)
 
     // 2. Analista
-    const analysed: { lead_id: string | null; company_id: string; name: string; category: string; city: string | null; analysis: string; score: number | null }[] = []
+    const analysed: { lead_id: string | null; company_id: string; name: string; category: string; city: string | null; address: string; phone: string | null; rating: number | null; reviews: number; analysis: string; score: number | null }[] = []
     for (const t of targets) {
         const { data: lead } = await sb.from('leads').select('id,score').eq('company_id', t.company_id).limit(1).maybeSingle()
         const analysis = (await llm(
@@ -92,12 +93,22 @@ Deno.serve(async (req) => {
         if (lead?.id) {
             await sb.from('leads').update({ owner_notes: analysis, next_action: 'Aprovar envio da proposta' }).eq('id', lead.id)
         }
-        analysed.push({ lead_id: lead?.id ?? null, company_id: t.company_id, name: t.name, category: t.type ?? query, city: t.address ? t.address.split(',').slice(-2, -1)[0]?.trim() ?? null : null, analysis, score: t.score ?? null })
+        analysed.push({ lead_id: lead?.id ?? null, company_id: t.company_id, name: t.name, category: t.type ?? query, city: t.address ? t.address.split(',').slice(-2, -1)[0]?.trim() ?? null : null, address: t.address ?? '', phone: t.phone ?? null, rating: t.rating ?? null, reviews: Number(t.reviews ?? 0), analysis, score: t.score ?? null })
     }
     await say('analista', `Analisei ${analysed.length} oportunidades. A melhor é ${analysed[0].name}${analysed[0].score ? `, com pontuação ${analysed[0].score}` : ''}.`)
 
-    // 3. Desenvolvedor: NÃO cria websites automaticamente. Os rascunhos só são criados pelo utilizador na página Websites.
-    const sitesCreated = 0
+    // 3. Designer: monta o site de cada oportunidade, a partir da análise e dos dados do mapa.
+    let sitesCreated = 0
+    for (const a of analysed) {
+        const { data: existing } = await sb.from('websites').select('id').eq('company_id', a.company_id).limit(1).maybeSingle()
+        if (existing) continue
+        const site = await buildSite({ name: a.name, category: a.category, city: a.city ?? '', address: a.address, phone: a.phone, rating: a.rating, reviews: a.reviews, score: a.score, analysis: a.analysis }, llm)
+        const { error } = await sb.from('websites').insert({
+            company_id: a.company_id, title: `Website — ${a.name}`, status: 'rascunho', slug: site.slug, content: site.content, theme: site.theme,
+        })
+        if (!error) sitesCreated++
+    }
+    await say('designer', `Desenhei ${sitesCreated} sites a partir da análise de cada empresa. Ficam como rascunhos para revisão; nada foi publicado.`)
 
     // 4. Vendedor: uma proposta por empresa, com o perfil de cada uma
     let proposalsCreated = 0

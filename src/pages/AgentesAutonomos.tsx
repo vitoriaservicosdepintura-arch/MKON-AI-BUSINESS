@@ -7,7 +7,8 @@ import { cn, relativeTime } from '@/lib/utils'
 
 type Run = { id: string; query: string; status: string; created_at: string }
 type Step = { id: string; run_id: string; agent_code: string; message: string; status: string; created_at: string }
-type Pkg = { id: string; title: string; total: number; notes: string | null; created_at: string; companies: { name: string } | null }
+type Pkg = { id: string; company_id: string; title: string; total: number; notes: string | null; created_at: string; companies: { name: string } | null }
+type SiteRow = { company_id: string; slug: string | null; status: string }
 
 /** Os cinco agentes da equipa, na ordem em que trabalham. `code` liga ao agente real que grava os passos. */
 const AGENTS = [
@@ -42,13 +43,18 @@ export default function AgentesAutonomos() {
   const [run, setRun] = useState<Run | null>(null)
   const [steps, setSteps] = useState<Step[]>([])
   const [packages, setPackages] = useState<Pkg[] | null>(null)
+  const [sites, setSites] = useState<Record<string, SiteRow>>({})
   const [deciding, setDeciding] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const [r, p] = await Promise.all([
+    const [r, p, w] = await Promise.all([
       supabase.from('pipeline_runs').select('id, query, status, created_at').order('created_at', { ascending: false }).limit(1),
-      supabase.from('proposals').select('id, title, total, notes, created_at, companies(name)').eq('status', 'rascunho').order('created_at', { ascending: false }).limit(30),
+      supabase.from('proposals').select('id, company_id, title, total, notes, created_at, companies(name)').eq('status', 'rascunho').order('created_at', { ascending: false }).limit(30),
+      supabase.from('websites').select('company_id, slug, status').eq('status', 'rascunho').not('slug', 'is', null).order('created_at', { ascending: false }).limit(100),
     ])
+    const byCompany: Record<string, SiteRow> = {}
+    for (const row of (w.data ?? []) as SiteRow[]) if (!byCompany[row.company_id]) byCompany[row.company_id] = row
+    setSites(byCompany)
     const last = (r.data?.[0] ?? null) as Run | null
     setRun(last)
     if (last) {
@@ -164,6 +170,11 @@ export default function AgentesAutonomos() {
                 </div>
                 <Badge tone="warning">À espera</Badge>
               </div>
+              {sites[p.company_id]?.slug && (
+                <a href={`/${sites[p.company_id].slug}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-brand-soft hover:underline">
+                  Pré-visualizar o site preparado pelo Designer
+                </a>
+              )}
               {p.notes && <p className="mt-2 line-clamp-4 whitespace-pre-line text-xs leading-relaxed text-white/60">{p.notes}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button size="sm" onClick={() => decide(p, 'aprovada')} loading={deciding === p.id}><Check className="h-3.5 w-3.5" /> Aprovar</Button>
