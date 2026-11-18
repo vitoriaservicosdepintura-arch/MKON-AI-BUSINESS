@@ -96,20 +96,8 @@ Deno.serve(async (req) => {
     }
     await say('analista', `Analisei ${analysed.length} oportunidades. A melhor é ${analysed[0].name}${analysed[0].score ? `, com pontuação ${analysed[0].score}` : ''}.`)
 
-    // 3. Desenvolvedor: rascunho de website por template
-    let sitesCreated = 0
-    for (const a of analysed) {
-        const tpl = pickTemplate(templates ?? [], a.category + ' ' + query)
-        if (!tpl) continue
-        const { data: existing } = await sb.from('websites').select('id').eq('company_id', a.company_id).limit(1).maybeSingle()
-        if (existing) continue
-        const { error } = await sb.from('websites').insert({
-            company_id: a.company_id, template_id: tpl.id, title: `Website — ${a.name}`, status: 'rascunho',
-            content: { brief: a.analysis, pages: tpl.structure ?? [], template: tpl.code },
-        })
-        if (!error) sitesCreated++
-    }
-    await say('desenvolvedor', `Criei ${sitesCreated} rascunhos de website a partir dos templates prontos. Ficam para revisão na página Websites.`)
+    // 3. Desenvolvedor: NÃO cria websites automaticamente. Os rascunhos só são criados pelo utilizador na página Websites.
+    const sitesCreated = 0
 
     // 4. Vendedor: uma proposta por empresa, com o perfil de cada uma
     let proposalsCreated = 0

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Globe, Plus, ExternalLink, Eye, CheckCircle, Archive, FileCode, Palette, Layout, Pencil } from 'lucide-react'
+import { Globe, Plus, ExternalLink, Eye, CheckCircle, Archive, FileCode, Palette, Layout, Pencil, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
@@ -72,6 +72,28 @@ export default function Websites() {
         toast.push('success', `Estado alterado para "${statusCfg[status]?.label}".`)
     }
 
+    /** Apaga um website, só depois de confirmação explícita do utilizador. */
+    const removeOne = async (site: Website) => {
+        if (demo) { toast.push('warning', 'Modo demo.'); return }
+        if (!window.confirm(`Apagar "${site.title}"? Esta ação não pode ser desfeita.`)) return
+        const { error } = await supabase.from('websites').delete().eq('id', site.id)
+        if (error) return toast.push('error', error.message)
+        setWebsites(s => s.filter(w => w.id !== site.id))
+        toast.push('success', 'Website apagado.')
+    }
+
+    /** Apaga só os rascunhos. Demonstrações, aprovados e publicados ficam intactos. */
+    const clearDrafts = async () => {
+        if (demo) { toast.push('warning', 'Modo demo.'); return }
+        const ids = websites.filter(w => w.status === 'rascunho').map(w => w.id)
+        if (ids.length === 0) return
+        if (!window.confirm(`Apagar ${ids.length} rascunhos? Demonstrações, aprovados e publicados não são afetados. Esta ação não pode ser desfeita.`)) return
+        const { error } = await supabase.from('websites').delete().in('id', ids).eq('status', 'rascunho')
+        if (error) return toast.push('error', error.message)
+        setWebsites(s => s.filter(w => w.status !== 'rascunho'))
+        toast.push('success', `${ids.length} rascunhos apagados.`)
+    }
+
     const filtered = websites.filter(w => !statusFilter || w.status === statusFilter)
 
     const statCounts = Object.fromEntries(Object.keys(statusCfg).map(s => [s, websites.filter(w => w.status === s).length]))
@@ -101,6 +123,11 @@ export default function Websites() {
                                 {cfg.label} ({statCounts[key]})
                             </button>
                         ))}
+                        {statCounts.rascunho > 0 && (
+                            <button onClick={clearDrafts} className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-1.5 text-xs text-red-300 transition hover:bg-red-500/10">
+                                <Trash2 className="h-3.5 w-3.5" /> Limpar rascunhos ({statCounts.rascunho})
+                            </button>
+                        )}
                     </div>
 
                     {loading ? (
@@ -141,6 +168,7 @@ export default function Websites() {
                                                 <Button size="sm" variant="ghost" onClick={() => setSelected(w)}>Detalhes</Button>
                                                 {w.status === 'demonstracao' && <Button size="sm" variant="outline" onClick={() => changeStatus(w, 'aprovado')}>Aprovar</Button>}
                                                 {w.status === 'aprovado' && <Button size="sm" onClick={() => changeStatus(w, 'publicado')}>Publicar</Button>}
+                                                <Button size="sm" variant="ghost" onClick={() => removeOne(w)} aria-label="Apagar website"><Trash2 className="h-3.5 w-3.5 text-red-300" /></Button>
                                             </div>
                                         </div>
                                     </Card>
