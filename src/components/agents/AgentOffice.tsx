@@ -10,19 +10,19 @@ export const AGENTS = [
   { code: 'supervisor', name: 'Diretor de Operações', short: 'Diretor', color: '#fbbf24', hair: '#5a3b22', desk: { x: 76, y: 38 }, real: true },
   { code: 'pesquisador', name: 'Inteligência Comercial', short: 'Comercial', color: '#38bdf8', hair: '#3b2a1a', desk: { x: 4, y: 30 }, real: true },
   { code: 'analista', name: 'Estrategista de Vendas', short: 'Estrategista', color: '#a78bfa', hair: '#1f1f1f', desk: { x: 14.5, y: 30 }, real: true },
-  { code: 'marketing', name: 'Marketing e Copy', short: 'Marketing', color: '#fb7185', hair: '#8a5a2b', desk: { x: 25, y: 30 }, real: false },
+  { code: 'marketing', name: 'Marketing e Copy', short: 'Marketing', color: '#fb7185', hair: '#8a5a2b', desk: { x: 25, y: 30 }, real: true },
   { code: 'designer', name: 'Web Designer', short: 'Designer', color: '#f472b6', hair: '#7a4a24', desk: { x: 4, y: 62 }, real: true },
-  { code: 'dev', name: 'Desenvolvedor Web', short: 'Dev', color: '#60a5fa', hair: '#222', desk: { x: 14.5, y: 62 }, real: false },
-  { code: 'qa', name: 'QA', short: 'QA', color: '#2dd4bf', hair: '#4b3621', desk: { x: 25, y: 62 }, real: false },
+  { code: 'dev', name: 'Desenvolvedor Web', short: 'Dev', color: '#60a5fa', hair: '#222', desk: { x: 14.5, y: 62 }, real: true },
+  { code: 'qa', name: 'QA', short: 'QA', color: '#2dd4bf', hair: '#4b3621', desk: { x: 25, y: 62 }, real: true },
   { code: 'vendedor', name: 'Propostas Comerciais', short: 'Propostas', color: '#34d399', hair: '#2a2a2a', desk: { x: 35.5, y: 62 }, real: true },
-  { code: 'negociacao', name: 'Negociação', short: 'Negociação', color: '#f97316', hair: '#6b4423', desk: { x: 48, y: 64 }, real: false },
-  { code: 'relacionamento', name: 'Relacionamento', short: 'Relação', color: '#facc15', hair: '#1c1c1c', desk: { x: 35.5, y: 30 }, real: false },
+  { code: 'negociacao', name: 'Negociação', short: 'Negociação', color: '#f97316', hair: '#6b4423', desk: { x: 48, y: 64 }, real: true },
+  { code: 'relacionamento', name: 'Relacionamento', short: 'Relação', color: '#facc15', hair: '#1c1c1c', desk: { x: 35.5, y: 30 }, real: true },
 ] as const
 
 export type Step = { id: string; run_id: string; agent_code: string; message: string; status: string; created_at: string }
 export type AgentStatus = 'trabalhando' | 'descanso' | 'espera' | 'aprovacao' | 'erro'
 
-const PIPELINE_ORDER = ['pesquisador', 'analista', 'designer', 'vendedor', 'supervisor'] as const
+const PIPELINE_ORDER = ['pesquisador', 'analista', 'designer', 'dev', 'qa', 'vendedor', 'marketing', 'relacionamento', 'negociacao', 'supervisor'] as const
 
 /** Estado de cada agente a partir dos passos reais da última execução. Só a pipeline faz trabalho real. */
 export function deriveStatus(steps: Step[], runStatus: string | null): Record<string, AgentStatus> {
@@ -101,7 +101,7 @@ export function AgentOffice({ steps, runStatus, runQuery, busy, approved }: {
 
   const restingIdx = (code: string) => AGENTS.findIndex(a => a.code === code)
   const doneCount = PIPELINE_ORDER.filter(c => status[c] === 'descanso' || status[c] === 'aprovacao').length
-  const stageIndex = approved > 0 ? 6 : Math.min(doneCount, 5)
+  const stageIndex = approved > 0 ? 6 : doneCount >= PIPELINE_ORDER.length ? 5 : Math.min(Math.floor((doneCount / PIPELINE_ORDER.length) * 5), 4)
 
   return (
     <div className="space-y-3">
@@ -220,7 +220,7 @@ export function AgentOffice({ steps, runStatus, runQuery, busy, approved }: {
           </li>
         ))}
       </ol>
-      <p className="text-[11px] text-white/35">Os agentes só trabalham quando a pipeline lhes atribui uma tarefa real. Os restantes aguardam sentados.</p>
+      <p className="text-[11px] text-white/35">Cada agente trabalha quando a pipeline lhe atribui a sua tarefa real. Os que ainda não têm tarefa aguardam sentados.</p>
     </div>
   )
 }
