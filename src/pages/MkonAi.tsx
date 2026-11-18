@@ -19,8 +19,24 @@ const STATUS_LABEL: Record<Draft['status'], { label: string; tone: 'brand' | 'su
 }
 
 /** MKON AI: configuração do provedor, consumo e fila de aprovação humana. A IA nunca envia nada sozinha. */
+type LucyWork = { kind: string; items: { name: string; status: string }[] }
+
 export default function MkonAi() {
   const toast = useToast()
+  // Trabalho feito pela Lucy: as empresas aparecem uma a uma e mudam de estado no ecrã.
+  const [work, setWork] = useState<LucyWork | null>(null)
+  const [shown, setShown] = useState<string[]>([])
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('mkon.lucy.work')
+      if (!raw) return
+      sessionStorage.removeItem('mkon.lucy.work')
+      const w = JSON.parse(raw) as LucyWork
+      setWork(w)
+      setShown(w.items.map(() => 'a preparar'))
+      w.items.forEach((it, i) => setTimeout(() => setShown(prev => prev.map((s, j) => (j === i ? it.status : s))), 800 * (i + 1)))
+    } catch { /* ignore */ }
+  }, [])
   const [cfg, setCfg] = useState<Config>(DEFAULT_CONFIG)
   const [savingCfg, setSavingCfg] = useState(false)
   const [usage, setUsage] = useState<Usage[] | null>(null)
@@ -88,6 +104,20 @@ export default function MkonAi() {
   return (
     <>
       <PageHeader title="MKON AI" description="Assistente comercial e operacional. Configure o provedor, acompanhe o consumo e aprove o que a IA prepara. A chave fica só no servidor." />
+
+      {work && (
+        <Card className="mb-5">
+          <CardHeader title="A Lucy trabalhou" subtitle={`${work.kind === 'followup' ? 'Follow-ups' : 'Abordagens'} preparadas. Nada foi enviado: aprove na fila abaixo.`} />
+          <ul className="space-y-2 p-5">
+            {work.items.map((it, i) => (
+              <li key={i} className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs animate-fade-up" style={{ animationDelay: `${i * 80}ms` }}>
+                <span className="truncate">{it.name}</span>
+                <span className={shown[i] === 'pronto' ? 'text-emerald-300' : shown[i] === 'falhou' ? 'text-red-300' : 'text-white/45'}>{shown[i] ?? 'a preparar'}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
         <Card>
