@@ -9,7 +9,6 @@ import Dashboard from '@/pages/Dashboard'
 import Crm from '@/pages/Crm'
 import Admin from '@/pages/Admin'
 import Prospeccao from '@/pages/Prospeccao'
-import Agentes from '@/pages/Agentes'
 import Mensagens from '@/pages/Mensagens'
 import Websites from '@/pages/Websites'
 import Propostas from '@/pages/Propostas'
@@ -36,9 +35,7 @@ import LojaGifsGabaritos from '@/pages/loja-gifs/Gabaritos'
 import { activateApiKeyFromUrl } from '@/lib/apikeys'
 import { UiPrefsProvider } from '@/lib/ui-prefs'
 import PublicSite from '@/pages/PublicSite'
-import AgentesAutonomos from '@/pages/AgentesAutonomos'
 import PublicTour from '@/pages/PublicTour'
-import ImoveisTour from '@/pages/ImoveisTour'
 import WebsiteEditor from '@/pages/WebsiteEditor'
 
 function UrlKeyActivator() {
@@ -116,14 +113,11 @@ export default function App() {
               <Route path="crm" element={<Crm />} />
               <Route path="admin" element={<Admin />} />
               <Route path="prospeccao" element={<Prospeccao />} />
-              <Route path="agentes" element={<Agentes />} />
               <Route path="mensagens" element={<Mensagens />} />
               <Route path="websites" element={<Websites />} />
               <Route path="websites/:id" element={<WebsiteEditor />} />
               <Route path="reunioes" element={<Reunioes />} />
               <Route path="mkon-ai" element={<MkonAi />} />
-              <Route path="agentes-autonomos" element={<AgentesAutonomos />} />
-              <Route path="imoveis-tour" element={<ImoveisTour />} />
               <Route path="propostas" element={<Propostas />} />
               <Route path="nfc" element={<NfcPage />} />
               <Route path="projetos" element={<Projetos />} />
