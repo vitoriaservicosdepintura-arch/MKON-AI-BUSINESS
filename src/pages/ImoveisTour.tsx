@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowDown, ArrowUp, ExternalLink, Globe, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { ArrowDown, ArrowUp, ExternalLink, Globe, Plus, Save, Sparkles, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge, Button, Card, CardHeader, Field, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
 
-type Room = { id: string; name: string; photos: string[] }
+type Room = { id: string; name: string; photos: string[]; caption?: string }
 type Tour = { id: string; title: string; slug: string | null; status: 'rascunho' | 'publicado'; rooms: Room[] }
 
 const RESERVED = ['crm', 'admin', 'prospeccao', 'agentes', 'agentes-autonomos', 'mensagens', 'websites', 'imoveis-tour', 'tour', 'propostas', 'nfc', 'login', 'r', 's', 'api', 'assets']
@@ -98,6 +98,20 @@ function TourEditor({ tour, onBack, onSaved }: { tour: Tour; onBack: () => void;
   const [roomName, setRoomName] = useState('')
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<string | null>(null)
+  const [generating, setGenerating] = useState(false)
+
+  const generateCaptions = async () => {
+    setGenerating(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('mkon-tour', { body: { action: 'captions', title, rooms: rooms.map(r => ({ id: r.id, name: r.name, photo: r.photos[0] ?? null })) } })
+      if (error) throw error
+      const map = ((data as { captions?: Record<string, string> })?.captions) ?? {}
+      setRooms(rs => rs.map(r => (map[r.id] ? { ...r, caption: map[r.id] } : r)))
+      toast.push('success', 'Legendas geradas. Revise antes de publicar.')
+    } catch (e) {
+      toast.push('error', e instanceof Error ? e.message : 'Falha ao gerar legendas.')
+    } finally { setGenerating(false) }
+  }
 
   const publicUrl = slug ? `${window.location.origin}/tour/${slug}` : null
 
@@ -171,6 +185,7 @@ function TourEditor({ tour, onBack, onSaved }: { tour: Tour; onBack: () => void;
                 <Button size="sm" variant="ghost" onClick={() => move(i, 1)} aria-label="Descer"><ArrowDown className="h-3.5 w-3.5" /></Button>
                 <Button size="sm" variant="ghost" onClick={() => setRooms(rs => rs.filter((_, j) => j !== i))} aria-label="Remover divisão"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
+              <input className="input w-full" value={r.caption ?? ''} onChange={e => patchRoom(i, { caption: e.target.value })} placeholder="Legenda de uma linha, como anúncio" aria-label="Legenda da divisão" />
               <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
                 {r.photos.map((src, k) => (
                   <div key={k} className="relative">
@@ -185,6 +200,7 @@ function TourEditor({ tour, onBack, onSaved }: { tour: Tour; onBack: () => void;
               </label>
             </div>
           ))}
+          {rooms.length > 0 && <Button variant="outline" onClick={generateCaptions} loading={generating}><Sparkles className="h-4 w-4" /> Gerar legendas com IA</Button>}
           <div className="flex flex-col gap-2 sm:flex-row">
             <input className="input flex-1" value={roomName} onChange={e => setRoomName(e.target.value)} placeholder="Ex.: Sala, Cozinha, Quarto 1" onKeyDown={e => e.key === 'Enter' && addRoom()} />
             <Button onClick={addRoom} disabled={!roomName.trim()}><Plus className="h-4 w-4" /> Adicionar divisão</Button>
