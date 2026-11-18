@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowDown, ArrowUp, Copy, ExternalLink, Globe, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { ArrowDown, ArrowUp, ExternalLink, Globe, Plus, Save, Trash2, Upload } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge, Button, Card, CardHeader, Field, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
-import { BROKER_GUIDE } from '@/lib/brokerGuide'
 
 type Room = { id: string; name: string; photos: string[] }
 type Tour = { id: string; title: string; slug: string | null; status: 'rascunho' | 'publicado'; rooms: Room[] }
@@ -87,22 +86,6 @@ export default function ImoveisTour() {
         </Card>
       )}
 
-      <Card className="mt-5">
-        <CardHeader title="Guia de prompts para corretores" subtitle="Copie cada prompt e cole no Claude." />
-        <div className="grid gap-3 p-4 md:grid-cols-2">
-          {BROKER_GUIDE.map((g) => (
-            <div key={g.title} className="rounded-xl border border-white/[0.07] p-4">
-              <p className="text-[10px] uppercase tracking-wider text-brand-soft">{g.label}</p>
-              <p className="mt-1 text-sm font-semibold">{g.title}</p>
-              <p className="mt-1 text-xs text-white/50">{g.intro}</p>
-              <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-black/30 p-3 font-mono text-[11px] leading-relaxed text-white/75">{g.prompt}</pre>
-              <Button size="sm" variant="outline" className="mt-2" onClick={async () => { try { await navigator.clipboard.writeText(g.prompt); toast.push('success', 'Prompt copiado.') } catch { toast.push('error', 'Não consegui copiar. Seleccione o texto e copie.') } }}>
-                <Copy className="h-3.5 w-3.5" /> Copiar prompt
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Card>
     </>
   )
 }
