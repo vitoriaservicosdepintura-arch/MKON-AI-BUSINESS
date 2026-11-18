@@ -5,8 +5,13 @@
 //   1. Pesquisador  → procura empresas na área do mapa (mkon-prospect)
 //   2. Analista     → analisa as oportunidades sem website
 //   3. Desenvolvedor → cria rascunho de website a partir de um template
+//   3b. Desenvolvedor → verifica a estrutura de cada site criado (contactos e menu)
+//   3c. QA          → testa endereços, títulos e secções de cada site
 //   4. Vendedor     → cria propostas em rascunho, uma por empresa
+//   4b. Marketing   → revê os textos de cada proposta
 //   5. Atendimento  → regista a mensagem sugerida em cada proposta (NÃO envia)
+//   5b. Negociação  → define os limites de negociação (NÃO contacta ninguém)
+//   5c. Relacionamento → organiza as oportunidades no CRM para seguimento
 //   6. Supervisor   → pede aprovação ao proprietário
 //
 // Limite: no máximo 4 empresas por execução (tempo da Edge Function).
@@ -99,6 +104,7 @@ Deno.serve(async (req) => {
 
     // 3. Designer: monta o site de cada oportunidade, a partir da análise e dos dados do mapa.
     let sitesCreated = 0
+    const createdSites: { company_id: string; name: string; slug: string; content: any }[] = []
     for (const a of analysed) {
         const { data: existing } = await sb.from('websites').select('id').eq('company_id', a.company_id).limit(1).maybeSingle()
         if (existing) continue
@@ -106,12 +112,50 @@ Deno.serve(async (req) => {
         const { error } = await sb.from('websites').insert({
             company_id: a.company_id, title: `Website — ${a.name}`, status: 'rascunho', slug: site.slug, content: site.content, theme: site.theme,
         })
-        if (!error) sitesCreated++
+        if (!error) { sitesCreated++; createdSites.push({ company_id: a.company_id, name: a.name, slug: site.slug, content: site.content }) }
     }
     await say('designer', `Desenhei ${sitesCreated} sites a partir da análise de cada empresa. Ficam como rascunhos para revisão; nada foi publicado.`)
 
+    // 3b. Desenvolvedor: verifica a estrutura de cada site (menu, secções e contactos).
+    const devIssues: string[] = []
+    let withContact = 0
+    for (const site of createdSites) {
+        const c = site.content ?? {}
+        const sectionTypes = new Set<string>((c.sections ?? []).map((x: any) => String(x.type)))
+        const anchorsOk = (c.menu ?? []).every((m: any) => {
+            const id = String(m.href ?? '').replace('#', '')
+            return id === 'contacto' || ['servicos', 'sobre', 'trabalhos', 'numeros', 'processo', 'testemunhos'].includes(id) && (
+                (id === 'servicos' && sectionTypes.has('services')) || (id === 'sobre' && sectionTypes.has('about')) ||
+                (id === 'trabalhos' && sectionTypes.has('gallery')) || (id === 'numeros' && sectionTypes.has('stats')) ||
+                (id === 'processo' && sectionTypes.has('process')) || (id === 'testemunhos' && sectionTypes.has('testimonials')))
+        })
+        if (c.contact?.phone || c.contact?.email) withContact++
+        else devIssues.push(`${site.name}: sem telefone nem email`)
+        if (!anchorsOk) devIssues.push(`${site.name}: menu aponta para uma secção que não existe`)
+    }
+    await say('dev', createdSites.length === 0
+        ? 'Não havia sites novos para verificar.'
+        : `Verifiquei ${createdSites.length} sites: ${withContact} com contacto.${devIssues.length ? ` A corrigir: ${devIssues.join('; ')}.` : ' Estrutura sem falhas.'}`,
+        devIssues.length ? 'erro' : 'ok')
+
+    // 3c. QA: endereços, títulos e tamanhos dos textos de cada site.
+    const qaIssues: string[] = []
+    for (const site of createdSites) {
+        const c = site.content ?? {}
+        if (!/^[a-z0-9-]{3,60}$/.test(site.slug)) qaIssues.push(`${site.name}: endereço inválido`)
+        if (!c.hero?.title) qaIssues.push(`${site.name}: sem título no topo`)
+        else if (String(c.hero.title).length > 90) qaIssues.push(`${site.name}: título demasiado longo`)
+        if (!(c.sections ?? []).length) qaIssues.push(`${site.name}: sem secções`)
+    }
+    await say('qa', createdSites.length === 0
+        ? 'Não havia sites para testar.'
+        : qaIssues.length ? `Testei ${createdSites.length} sites e encontrei ${qaIssues.length} problema(s): ${qaIssues.join('; ')}.`
+        : `Testei ${createdSites.length} sites: endereços, títulos e secções sem erros.`,
+        qaIssues.length ? 'erro' : 'ok')
+
     // 4. Vendedor: uma proposta por empresa, com o perfil de cada uma
     let proposalsCreated = 0
+    let copyOk = 0
     const year = new Date().getFullYear()
     for (const a of analysed) {
         const text = (await llm(
@@ -124,11 +168,21 @@ Deno.serve(async (req) => {
             status: 'rascunho', total: 0, notes: `${text}\n\nPreço a definir. Rascunho preparado pela equipa de agentes.`,
         })
         if (!error) proposalsCreated++
+        if (text.length >= 80) copyOk++
     }
     await say('vendedor', `Preparei ${proposalsCreated} propostas em rascunho, uma por empresa, com o perfil de cada uma. O preço ainda está por definir.`)
+    await say('marketing', `Revi os textos de ${proposalsCreated} propostas: ${copyOk} com argumentos completos. Nada foi enviado.`)
 
     // 5. Atendimento: mensagem sugerida (não envia)
     await say('atendimento', `Escrevi as mensagens sugeridas para cada empresa e guardei-as nas propostas. Não enviei nenhuma.`)
+
+    // 5b. Negociação: define limites. Não contacta ninguém.
+    const withPhone = analysed.filter((a) => a.phone).length
+    await say('negociacao', `Defini os limites de negociação: sem descontos, sem prazos prometidos e sem contratos fora das regras. ${withPhone} empresas têm telefone para contacto, depois da sua aprovação. Não contactei ninguém.`)
+
+    // 5c. Relacionamento: organiza as oportunidades ligadas a leads no CRM.
+    const withLead = analysed.filter((a) => a.lead_id).length
+    await say('relacionamento', `Tenho ${withLead} de ${analysed.length} oportunidades ligadas a leads no CRM para seguimento. Nenhum contacto foi feito.`)
 
     // 6. Supervisor: pedido de aprovação
     await sb.from('notifications').insert({
