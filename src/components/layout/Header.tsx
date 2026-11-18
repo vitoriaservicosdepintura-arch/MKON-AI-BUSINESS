@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Bot, Check, Command, Menu, Palette, Plug, Search, Settings, LogOut, OctagonAlert } from 'lucide-react'
+import { Bell, Check, Command, Menu, Palette, Plug, Search, Settings, LogOut, OctagonAlert } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth'
 import { NAV } from '@/lib/nav'
@@ -48,23 +48,19 @@ export function Header({ onMenu, killSwitch, onKillChange, onNotifCount }: {
   const [profileOpen, setProfileOpen] = useState(false)
   const [confirmKill, setConfirmKill] = useState(false)
   const [notifs, setNotifs] = useState<Notification[]>([])
-  const [agents, setAgents] = useState({ active: 0, total: 0 })
   const [integrations, setIntegrations] = useState({ connected: 0, total: 0 })
   const notifRef = useClickOutside(() => setNotifOpen(false))
   const profileRef = useClickOutside(() => setProfileOpen(false))
 
   useEffect(() => {
     const load = async () => {
-      const [n, a, i] = await Promise.all([
+      const [n, i] = await Promise.all([
         supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(15),
-        supabase.from('ai_agents').select('status'),
         supabase.from('integrations').select('status'),
       ])
       const list = (n.data ?? []) as Notification[]
       setNotifs(list)
       onNotifCount(list.filter((x) => !x.read_at).length)
-      const ag = (a.data ?? []) as { status: string }[]
-      setAgents({ active: ag.filter((x) => x.status === 'ativo').length, total: ag.length })
       const ig = (i.data ?? []) as { status: string }[]
       setIntegrations({ connected: ig.filter((x) => x.status === 'conectada').length, total: ig.length })
     }
@@ -124,11 +120,6 @@ export function Header({ onMenu, killSwitch, onKillChange, onNotifCount }: {
           <Command className="h-3.5 w-3.5" /> K
         </button>
 
-        <button onClick={() => nav('/agentes')} title="Estado dos agentes de IA" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/60 hover:bg-white/[0.05] md:flex">
-          <Bot className="h-4 w-4" />
-          <span className={cn('h-1.5 w-1.5 rounded-full', agents.active > 0 ? 'bg-emerald-400' : 'bg-white/25')} />
-          {agents.active}/{agents.total}
-        </button>
 
         <button onClick={() => nav('/admin')} title="Estado das integrações" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-white/60 hover:bg-white/[0.05] md:flex">
           <Plug className="h-4 w-4" />
