@@ -324,7 +324,19 @@ async function runAnthropic(
     sb: SupabaseClient, toolsUsed: string[], actions: unknown[],
 ): Promise<Response> {
     const tools = TOOLS.map((t) => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }))
-    const messages: any[] = history.map((m) => ({ role: m.role, content: m.content }))
+    // A API exige: primeira mensagem do utilizador, papéis alternados e conteúdo não vazio.
+    // A saudação inicial do chat (assistente) e mensagens vazias são removidas.
+    const messages: any[] = []
+    for (const m of history) {
+        const content = String(m.content ?? '').trim()
+        if (!content) continue
+        const role = m.role === 'assistant' ? 'assistant' : 'user'
+        if (messages.length === 0 && role === 'assistant') continue
+        const last = messages[messages.length - 1]
+        if (last && last.role === role) last.content = `${last.content}\n\n${content}`
+        else messages.push({ role, content })
+    }
+    if (messages.length === 0) return json({ error: 'Mensagem vazia.' }, 400)
 
     for (let step = 0; step < 6; step++) {
         let res: Response
@@ -339,7 +351,7 @@ async function runAnthropic(
         }
         if (!res.ok) {
             const detail = await res.text().catch(() => '')
-            return json({ error: `API da Anthropic devolveu erro ${res.status}.`, detail: detail.slice(0, 300) }, 502)
+            return json({ error: `API da Anthropic devolveu erro ${res.status}.`, detail: detail.slice(0, 600) }, 502)
         }
 
         const data = await res.json()
