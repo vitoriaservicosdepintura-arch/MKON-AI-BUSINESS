@@ -307,7 +307,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
         <Kpi loading={loading} icon={Building2} label="Empresas" value={d.companies} to="/prospeccao" />
         <Kpi loading={loading} icon={UserPlus} label="Novos leads" value={m.newLeads} to="/crm" />
         <Kpi loading={loading} icon={BadgeCheck} label="Qualificados" value={m.qualified} to="/crm" />

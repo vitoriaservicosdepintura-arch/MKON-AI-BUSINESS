@@ -47,7 +47,7 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
 
 /* ---------- Card ---------- */
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn('card', className)}>{children}</div>
+  return <div className={cn('card min-w-0', className)}>{children}</div>
 }
 export function CardHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return (
