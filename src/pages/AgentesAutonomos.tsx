@@ -1,60 +1,36 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Users, Radar, BarChart3, Palette, FileText, ShieldCheck, Send, Check, X } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Users, Send, Check, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge, Button, Card, CardHeader, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
-import { cn, relativeTime } from '@/lib/utils'
+import { relativeTime } from '@/lib/utils'
+import { AgentOffice, type Step } from '@/components/agents/AgentOffice'
 
 type Run = { id: string; query: string; status: string; created_at: string }
-type Step = { id: string; run_id: string; agent_code: string; message: string; status: string; created_at: string }
 type Pkg = { id: string; company_id: string; title: string; total: number; notes: string | null; created_at: string; companies: { name: string } | null }
 type SiteRow = { company_id: string; slug: string | null; status: string }
 
-/** Os cinco agentes da equipa, na ordem em que trabalham. `code` liga ao agente real que grava os passos. */
-const AGENTS = [
-  { code: 'pesquisador', name: 'Pesquisador', role: 'Capta leads na internet e no mapa', icon: Radar, color: '#38bdf8' },
-  { code: 'analista', name: 'Analista', role: 'Avalia cada empresa e a oportunidade', icon: BarChart3, color: '#a78bfa' },
-  { code: 'designer', name: 'Designer', role: 'Monta e personaliza a estrutura do site', icon: Palette, color: '#f472b6' },
-  { code: 'vendedor', name: 'Propostas', role: 'Escreve a proposta de cada cliente', icon: FileText, color: '#34d399' },
-  { code: 'supervisor', name: 'Revisor', role: 'Prepara o pacote para a sua aprovação', icon: ShieldCheck, color: '#fbbf24' },
-] as const
-
-/** Estado de cada agente a partir dos passos reais da última execução. */
-function agentState(code: string, steps: Step[], busy: boolean, index: number, busyIndex: number) {
-  if (busy) return index === busyIndex ? 'a trabalhar' : index < busyIndex ? 'concluido' : 'à espera'
-  const mine = steps.filter(s => s.agent_code === code)
-  if (mine.length === 0) return 'parado'
-  const last = mine[mine.length - 1]
-  if (last.status === 'erro') return 'erro'
-  if (last.status === 'aguarda_aprovacao') return 'aguarda aprovação'
-  return 'concluido'
-}
-
-const stateTone: Record<string, 'success' | 'warning' | 'danger' | 'neutral' | 'brand'> = {
-  'a trabalhar': 'brand', concluido: 'success', 'aguarda aprovação': 'warning', erro: 'danger', 'à espera': 'neutral', parado: 'neutral',
-}
-
-/** Página "Agentes autónomos": sala da equipa, pedido à equipa e pacotes prontos para aprovação. Nada é enviado aos clientes. */
+/** Página "Agentes autónomos": sala da equipa (ao vivo), pedido à equipa e pacotes para aprovação. Nada é enviado aos clientes. */
 export default function AgentesAutonomos() {
   const toast = useToast()
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
-  const [busyIndex, setBusyIndex] = useState(0)
   const [run, setRun] = useState<Run | null>(null)
   const [steps, setSteps] = useState<Step[]>([])
   const [packages, setPackages] = useState<Pkg[] | null>(null)
   const [sites, setSites] = useState<Record<string, SiteRow>>({})
+  const [approved, setApproved] = useState(0)
   const [deciding, setDeciding] = useState<string | null>(null)
 
+  const runActive = !!run && !['concluida', 'erro'].includes(run.status)
+
   const load = useCallback(async () => {
-    const [r, p, w] = await Promise.all([
+    const [r, p, w, a] = await Promise.all([
       supabase.from('pipeline_runs').select('id, query, status, created_at').order('created_at', { ascending: false }).limit(1),
       supabase.from('proposals').select('id, company_id, title, total, notes, created_at, companies(name)').eq('status', 'rascunho').order('created_at', { ascending: false }).limit(30),
       supabase.from('websites').select('company_id, slug, status').eq('status', 'rascunho').not('slug', 'is', null).order('created_at', { ascending: false }).limit(100),
+      supabase.from('proposals').select('id', { count: 'exact', head: true }).eq('status', 'aprovada'),
     ])
-    const byCompany: Record<string, SiteRow> = {}
-    for (const row of (w.data ?? []) as SiteRow[]) if (!byCompany[row.company_id]) byCompany[row.company_id] = row
-    setSites(byCompany)
     const last = (r.data?.[0] ?? null) as Run | null
     setRun(last)
     if (last) {
@@ -62,17 +38,20 @@ export default function AgentesAutonomos() {
       setSteps((st ?? []) as Step[])
     } else setSteps([])
     setPackages((p.data ?? []) as unknown as Pkg[])
+    const byCompany: Record<string, SiteRow> = {}
+    for (const row of (w.data ?? []) as SiteRow[]) if (!byCompany[row.company_id]) byCompany[row.company_id] = row
+    setSites(byCompany)
+    setApproved(a.count ?? 0)
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  // Enquanto a equipa trabalha, a sala mostra o agente ativo a avançar pela ordem.
+  // Ao vivo: enquanto a equipa trabalha, atualiza a cada 2 s; caso contrário, a cada 20 s.
   useEffect(() => {
-    if (!busy) return
-    setBusyIndex(0)
-    const t = setInterval(() => setBusyIndex(i => Math.min(i + 1, AGENTS.length - 1)), 2200)
+    const ms = busy || runActive ? 2000 : 20000
+    const t = setInterval(load, ms)
     return () => clearInterval(t)
-  }, [busy])
+  }, [busy, runActive, load])
 
   const send = async () => {
     const q = query.trim()
@@ -104,20 +83,13 @@ export default function AgentesAutonomos() {
     setDeciding(null)
     if (error) return toast.push('error', error.message)
     setPackages(p => (p ?? []).filter(x => x.id !== pkg.id))
+    if (status === 'aprovada') setApproved(n => n + 1)
     toast.push('success', status === 'aprovada' ? 'Aprovado. O envio ao cliente ainda não está ligado; nada foi enviado.' : 'Pacote recusado.')
-  }
-
-  const busyIdx = busyIndex
-  const roster = useMemo(() => AGENTS.map((a, i) => ({ ...a, state: agentState(a.code, steps, busy, i, busyIdx) })), [steps, busy, busyIdx])
-  const bubble = (code: string) => {
-    if (busy) return ''
-    const m = steps.filter(s => s.agent_code === code).pop()
-    return m?.message ?? ''
   }
 
   return (
     <>
-      <PageHeader title="Agentes autónomos" description="A sua equipa de agentes capta, analisa, desenha e propõe. Só envia depois da sua aprovação." />
+      <PageHeader title="Agentes autónomos" description="A equipa capta, analisa, desenha e propõe sozinha, até ao contrato. Só envia depois da sua aprovação." />
 
       <Card className="mb-5 p-4">
         <p className="mb-2 text-xs text-white/50">Dê uma missão à equipa (ex.: “canalizadores em Viseu”)</p>
@@ -127,37 +99,15 @@ export default function AgentesAutonomos() {
         </div>
       </Card>
 
-      {/* Sala da equipa: cenário em perspetiva, com uma estação por agente. */}
       <Card className="mb-5 overflow-hidden">
-        <CardHeader title="Sala da equipa" subtitle={run ? `Última missão: “${run.query}” · ${relativeTime(run.created_at)}` : 'Ainda sem missões'} />
-        <div className="relative p-4 sm:p-6" style={{ background: 'radial-gradient(ellipse at 50% 0%, rgba(56,189,248,0.10), transparent 60%), #0b1020' }}>
-          <div className="mx-auto grid max-w-5xl grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5" style={{ transform: 'perspective(1000px) rotateX(14deg)', transformOrigin: '50% 0%' }}>
-            {roster.map((a) => {
-              const Icon = a.icon
-              const active = a.state === 'a trabalhar'
-              const text = bubble(a.code)
-              return (
-                <div key={a.code} className="flex flex-col items-center">
-                  <div className={cn('relative min-h-[64px] w-full max-w-[150px] rounded-t-lg px-2 py-1.5 text-center text-[11px] leading-snug text-white/75', text ? 'bg-white/[0.08]' : 'bg-transparent')}>
-                    {text && <span className="line-clamp-4">{text}</span>}
-                  </div>
-                  <div className={cn('relative flex h-16 w-16 items-center justify-center rounded-full border-2 transition-transform duration-500', active && 'animate-bounce')}
-                    style={{ borderColor: a.color, background: `${a.color}22`, boxShadow: active ? `0 0 24px ${a.color}aa` : 'none' }}>
-                    <Icon className="h-7 w-7" style={{ color: a.color }} />
-                  </div>
-                  <div className="mt-2 h-2 w-24 rounded-full bg-white/10" style={{ boxShadow: active ? `0 0 12px ${a.color}` : 'none' }} />
-                  <p className="mt-2 text-sm font-medium">{a.name}</p>
-                  <p className="text-center text-[10px] text-white/40">{a.role}</p>
-                  <div className="mt-1.5"><Badge tone={stateTone[a.state] ?? 'neutral'}>{a.state}</Badge></div>
-                </div>
-              )
-            })}
-          </div>
+        <CardHeader title="Escritório da equipa" subtitle={run ? `Estado em direto · ${relativeTime(run.created_at)}` : 'Ainda sem missões'} />
+        <div className="p-4 sm:p-5">
+          <AgentOffice steps={steps} runStatus={run?.status ?? null} runQuery={run?.query ?? null} busy={busy} approved={approved} />
         </div>
       </Card>
 
       <Card>
-        <CardHeader title="Pacotes prontos para aprovação" subtitle="Proposta e site preparados pela equipa. Aprove ou recuse; nada sai daqui sem o seu clique." />
+        <CardHeader title="Pacotes prontos para aprovação" subtitle="Proposta e site preparados pela equipa. Nada sai daqui sem o seu clique." />
         <div className="space-y-3 p-4">
           {packages === null ? <Skeleton className="h-24" /> : packages.length === 0 ? (
             <p className="py-6 text-center text-sm text-white/45"><Users className="mx-auto mb-2 h-5 w-5 opacity-50" />Nenhum pacote à espera de aprovação.</p>
