@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import * as THREE from 'three'
 import { supabase } from '@/lib/supabase'
 
-type Room = { id: string; name: string; photos: string[] }
+type Room = { id: string; name: string; photos: string[]; caption?: string }
 type Tour = { title: string; slug: string; rooms: Room[] }
 
 // Medidas em metros. Divisões em linha, ligadas por portas abertas.
@@ -14,12 +14,16 @@ const EYE = 1.65   // altura dos olhos
 const DOOR = 1.6   // largura das portas
 const SPEED = 2.2  // m/s
 const TURN = 1.8   // rad/s
+const GUIDE_MS = 90000 // duração do modo tour guiado
 
 /** Visita virtual de um imóvel: cada divisão tem as fotos nas paredes; anda-se com setas (PC) ou botões (telemóvel). */
 export default function PublicTour() {
   const { slug = '' } = useParams()
   const [tour, setTour] = useState<Tour | null | undefined>(undefined)
   const [current, setCurrent] = useState('')
+  const [caption, setCaption] = useState('')
+  const [guiding, setGuiding] = useState(false)
+  const guide = useRef<{ start: () => void; stop: () => void } | null>(null)
   const mountRef = useRef<HTMLDivElement>(null)
   const minimapRef = useRef<HTMLCanvasElement>(null)
   const held = useRef({ fwd: 0, turn: 0 })
@@ -103,6 +107,15 @@ export default function PublicTour() {
     }
     const roomAt = (x: number) => Math.min(n - 1, Math.max(0, Math.floor(x / W)))
 
+    // Modo guiado: a câmara desliza pelas divisões em ordem, em cerca de 90 segundos.
+    let guideT0: number | null = null
+    const stopGuide = () => { guideT0 = null; setGuiding(false) }
+    const startGuide = () => {
+      guideT0 = performance.now(); setGuiding(true)
+      player.x = 0.3; player.z = D / 2; rot.current.yaw = -Math.PI / 2; rot.current.pitch = 0
+    }
+    guide.current = { start: startGuide, stop: stopGuide }
+
     const resize = () => {
       const w = mount.clientWidth, h = mount.clientHeight
       renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix()
@@ -132,12 +145,12 @@ export default function PublicTour() {
 
     // Controlos: teclado (setas e WASD), arrastar com rato ou dedo
     const keys = new Set<string>()
-    const onKeyDown = (e: KeyboardEvent) => { keys.add(e.key.toLowerCase()); if (e.key.startsWith('Arrow')) e.preventDefault() }
+    const onKeyDown = (e: KeyboardEvent) => { stopGuide(); keys.add(e.key.toLowerCase()); if (e.key.startsWith('Arrow')) e.preventDefault() }
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase())
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp)
     const canvas = renderer.domElement
     canvas.style.touchAction = 'none'
-    const onDown = (e: PointerEvent) => { dragging.current = { x: e.clientX, y: e.clientY } }
+    const onDown = (e: PointerEvent) => { stopGuide(); dragging.current = { x: e.clientX, y: e.clientY } }
     const onMove = (e: PointerEvent) => {
       if (!dragging.current) return
       rot.current.yaw -= (e.clientX - dragging.current.x) * 0.005
@@ -158,6 +171,7 @@ export default function PublicTour() {
       const strafe = (keys.has('d') ? 1 : 0) - (keys.has('a') ? 1 : 0)
       const fwd = fwdKey + held.current.fwd
       const turn = turnKey + held.current.turn
+      if (guideT0 === null) {
       rot.current.yaw += turn * TURN * dt
       const yaw = rot.current.yaw
       const fx = -Math.sin(yaw), fz = -Math.cos(yaw)
@@ -166,13 +180,18 @@ export default function PublicTour() {
       const mz = (fz * fwd + rz * strafe) * SPEED * dt
       if (inside(player.x + mx, player.z)) player.x += mx
       if (inside(player.x, player.z + mz)) player.z += mz
+      } else {
+        const p = (now - guideT0) / GUIDE_MS
+        if (p >= 1) stopGuide()
+        else { player.x = 0.3 + p * (totalW - 0.6); player.z = D / 2; rot.current.yaw = -Math.PI / 2 + Math.sin(p * Math.PI * 6) * 0.08 }
+      }
       camera.position.set(player.x, EYE, player.z)
       camera.rotation.set(rot.current.pitch, rot.current.yaw, 0, 'YXZ')
       renderer.render(scene, camera)
       if (frame++ % 6 === 0) {
         drawMinimap()
         const name = rooms[roomAt(player.x)].name
-        if (name !== lastRoom) { lastRoom = name; setCurrent(name) }
+        if (name !== lastRoom) { lastRoom = name; setCurrent(name); setCaption(rooms[roomAt(player.x)].caption ?? '') }
       }
       raf = requestAnimationFrame(loop)
     }
@@ -198,6 +217,7 @@ export default function PublicTour() {
   }
 
   const pad = (dir: 'fwd' | 'back' | 'left' | 'right', on: boolean) => {
+    if (on) guide.current?.stop()
     if (dir === 'fwd') held.current.fwd = on ? 1 : 0
     if (dir === 'back') held.current.fwd = on ? -1 : 0
     if (dir === 'left') held.current.turn = on ? -1 : 0
@@ -217,6 +237,7 @@ export default function PublicTour() {
       <div className="pointer-events-none absolute left-3 top-3 rounded-lg bg-black/50 px-3 py-2 text-white">
         <p className="text-[10px] uppercase tracking-wider text-white/60">{tour.title}</p>
         <p className="text-sm font-semibold">{current || tour.rooms[0].name}</p>
+        {caption && <p className="mt-0.5 max-w-[16rem] text-xs text-white/85">{caption}</p>}
       </div>
       <div className="absolute right-3 top-3 rounded-lg border border-white/20 p-1">
         <canvas ref={minimapRef} width={150} height={64} className="block" />
@@ -226,6 +247,10 @@ export default function PublicTour() {
         <span />{btn('fwd', '▲')}<span />
         {btn('left', '◀')}{btn('back', '▼')}{btn('right', '▶')}
       </div>
+      <button
+        onClick={() => (guiding ? guide.current?.stop() : guide.current?.start())}
+        className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-lg"
+      >{guiding ? 'Parar tour' : 'Começar tour'}</button>
       <p className="pointer-events-none absolute bottom-4 right-4 hidden rounded bg-black/50 px-2 py-1 text-[11px] text-white/80 sm:block">
         Setas: andar e rodar · arraste com o rato para olhar
       </p>
