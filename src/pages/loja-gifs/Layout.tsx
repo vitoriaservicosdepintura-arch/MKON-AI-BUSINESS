@@ -27,7 +27,7 @@ export default function LojaGifsLayout() {
   const go = (to: string) => { navigate(to); setDrawerOpen(false) }
 
   return (
-    <div className="flex h-full min-w-0">
+    <div className="flex h-full min-w-0 overflow-x-clip">
       {/* Sidebar da Loja */}
       {/* Fundo escuro no telemóvel quando o menu está aberto */}
       {drawerOpen && <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setDrawerOpen(false)} aria-hidden />}
