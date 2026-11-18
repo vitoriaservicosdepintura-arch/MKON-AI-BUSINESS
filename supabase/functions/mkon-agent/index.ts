@@ -345,13 +345,14 @@ async function runAnthropic(
             res = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-                body: JSON.stringify({ model, max_tokens: 2048, temperature: 0.3, system, tools, messages }),
+                body: JSON.stringify({ model, max_tokens: 2048, system, tools, messages }),
             })
         } catch {
             return json({ error: 'Não foi possível ligar à API da Anthropic a partir do servidor.' }, 502)
         }
         if (!res.ok) {
             const detail = await res.text().catch(() => '')
+            console.error('anthropic_error', res.status, detail.slice(0, 1000))
             return json({ error: `API da Anthropic devolveu erro ${res.status}.`, detail: detail.slice(0, 600) }, 502)
         }
 
