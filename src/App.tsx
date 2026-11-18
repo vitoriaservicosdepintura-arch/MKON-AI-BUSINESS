@@ -35,6 +35,8 @@ import LojaGifsConfiguracoes from '@/pages/loja-gifs/Configuracoes'
 import LojaGifsGabaritos from '@/pages/loja-gifs/Gabaritos'
 import { activateApiKeyFromUrl } from '@/lib/apikeys'
 import { UiPrefsProvider } from '@/lib/ui-prefs'
+import PublicSite from '@/pages/PublicSite'
+import WebsiteEditor from '@/pages/WebsiteEditor'
 
 function UrlKeyActivator() {
   const toast = useToast()
@@ -104,6 +106,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/r/:slug" element={<NfcPublic />} />
+            <Route path="/:slug" element={<PublicSite />} />
             <Route element={<Protected />}>
               <Route index element={<Dashboard />} />
               <Route path="crm" element={<Crm />} />
@@ -112,6 +115,7 @@ export default function App() {
               <Route path="agentes" element={<Agentes />} />
               <Route path="mensagens" element={<Mensagens />} />
               <Route path="websites" element={<Websites />} />
+              <Route path="websites/:id" element={<WebsiteEditor />} />
               <Route path="reunioes" element={<Reunioes />} />
               <Route path="mkon-ai" element={<MkonAi />} />
               <Route path="propostas" element={<Propostas />} />

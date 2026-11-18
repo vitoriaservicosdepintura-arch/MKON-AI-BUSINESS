@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Globe, Plus, ExternalLink, Eye, CheckCircle, Archive, FileCode, Palette, Layout } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Globe, Plus, ExternalLink, Eye, CheckCircle, Archive, FileCode, Palette, Layout, Pencil } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, Skeleton } from '@/components/ui'
 import { useToast } from '@/components/ui/Toast'
@@ -7,7 +8,7 @@ import { cn, relativeTime } from '@/lib/utils'
 import { isDemoActive } from '@/lib/demo'
 
 type Website = {
-    id: string; title: string; status: string; preview_url: string | null; published_url: string | null
+    id: string; title: string; status: string; slug?: string | null; preview_url: string | null; published_url: string | null
     created_at: string; updated_at: string
     companies: { name: string; city: string | null } | null
     website_templates: { name: string; segment: string } | null
@@ -52,7 +53,7 @@ export default function Websites() {
     const load = useCallback(async () => {
         if (demo) return
         const [ws, ts] = await Promise.all([
-            supabase.from('websites').select('id, title, status, preview_url, published_url, created_at, updated_at, companies(name, city), website_templates(name, segment)').order('updated_at', { ascending: false }),
+            supabase.from('websites').select('id, title, status, slug, preview_url, published_url, created_at, updated_at, companies(name, city), website_templates(name, segment)').order('updated_at', { ascending: false }),
             supabase.from('website_templates').select('id, code, name, segment, is_active').order('name'),
         ])
         if (ws.error) toast.push('error', ws.error.message)
@@ -130,11 +131,13 @@ export default function Websites() {
                                             {w.website_templates && <p className="mt-1 text-[11px] text-white/30">{w.website_templates.name}</p>}
                                             <div className="mt-3 flex items-center gap-2">
                                                 {w.preview_url && <a href={w.preview_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[11px] text-brand-soft hover:underline"><ExternalLink className="h-3 w-3" /> Preview</a>}
+                                                {w.slug && <a href={`/${w.slug}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[11px] text-white/60 hover:underline"><ExternalLink className="h-3 w-3" /> /{w.slug}</a>}
                                                 {w.published_url && <a href={w.published_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[11px] text-green-400 hover:underline"><ExternalLink className="h-3 w-3" /> Publicado</a>}
                                                 <span className="ml-auto text-[11px] text-white/25">{relativeTime(w.updated_at)}</span>
                                             </div>
                                             <div className="mt-3 flex gap-1.5">
-                                                <Button size="sm" variant="ghost" className="flex-1" onClick={() => setSelected(w)}>Ver detalhes</Button>
+                                                <Link to={`/websites/${w.id}`} className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-lg px-3 text-xs text-brand-soft hover:bg-white/[0.05]"><Pencil className="h-3 w-3" /> Editar</Link>
+                                                <Button size="sm" variant="ghost" onClick={() => setSelected(w)}>Detalhes</Button>
                                                 {w.status === 'demonstracao' && <Button size="sm" variant="outline" onClick={() => changeStatus(w, 'aprovado')}>Aprovar</Button>}
                                                 {w.status === 'aprovado' && <Button size="sm" onClick={() => changeStatus(w, 'publicado')}>Publicar</Button>}
                                             </div>
