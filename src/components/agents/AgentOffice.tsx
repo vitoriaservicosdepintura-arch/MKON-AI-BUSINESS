@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Volume2, VolumeX, Bell, Moon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -44,11 +44,12 @@ export function deriveStatus(steps: Step[], runStatus: string | null): Record<st
 
 // Layout do piso (percentagens). Mesmo esquema da planta: salas de reunião em vidro no topo,
 // secretárias em duas filas, lounge ao centro, repouso e painel do gerente à direita.
-const REST_SPOTS = [
+export const REST_SPOTS = [
   { x: 76, y: 9 }, { x: 84, y: 9 }, { x: 92, y: 9 }, { x: 76, y: 17 }, { x: 84, y: 17 },
   { x: 92, y: 17 }, { x: 76, y: 25 }, { x: 84, y: 25 }, { x: 92, y: 25 }, { x: 88, y: 31 },
 ]
 const MEETING_ROOMS = [{ x: 3, label: 'Reunião 1' }, { x: 21, label: 'Reunião 2' }, { x: 39, label: 'Reunião 3' }]
+const AgentOffice3D = lazy(() => import('./AgentOffice3D'))
 const STAGES = ['Pesquisa', 'Análise', 'Design', 'Proposta', 'Revisão', 'Aprovação', 'Contrato']
 
 /** Sons sintetizados (sem ficheiros): teclado enquanto trabalham, sino quando alguém termina. */
@@ -81,6 +82,7 @@ export function AgentOffice({ steps, runStatus, runQuery, busy, approved }: {
 }) {
   const status = useMemo(() => deriveStatus(steps, runStatus), [steps, runStatus])
   const sound = useSound()
+  const [view, setView] = useState<'2d' | '3d'>('2d')
   const prevRef = useRef<Record<string, AgentStatus>>({})
   const working = Object.values(status).some(s => s === 'trabalhando')
 
@@ -114,12 +116,23 @@ export function AgentOffice({ steps, runStatus, runQuery, busy, approved }: {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-white/50">{runQuery ? `Missão: “${runQuery}”` : 'Sem missão ativa'}{busy ? ' · a equipa está a trabalhar' : ''}</p>
+        <div className="flex gap-2">
+          <button onClick={() => setView(v => (v === '2d' ? '3d' : '2d'))} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-white/70 hover:bg-white/[0.05]">
+            {view === '2d' ? 'Vista 3D' : 'Vista plana'}
+          </button>
         <button onClick={sound.toggle} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-white/70 hover:bg-white/[0.05]" aria-label={sound.on ? 'Desligar som' : 'Ligar som'}>
           {sound.on ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />} {sound.on ? 'Som ligado' : 'Ligar som'}
         </button>
+        </div>
       </div>
 
-      <div className="-mx-1 overflow-x-auto pb-1">
+      {view === '3d' && (
+        <Suspense fallback={<div className="flex h-[460px] items-center justify-center rounded-2xl bg-slate-900 text-xs text-white/50">A carregar a sala 3D…</div>}>
+          <AgentOffice3D status={status} approved={approved} />
+        </Suspense>
+      )}
+
+      {view === '2d' && <div className="-mx-1 overflow-x-auto pb-1">
         <div className="relative min-w-[680px] rounded-2xl border border-white/[0.08]" style={{ aspectRatio: '16 / 10', background: '#c9ced6', perspective: '1200px' }}>
           <div className="absolute inset-0" style={{ transform: 'rotateX(14deg)', transformOrigin: '50% 70%', transformStyle: 'preserve-3d' }}>
             {/* Piso e paredes */}
@@ -209,7 +222,7 @@ export function AgentOffice({ steps, runStatus, runQuery, busy, approved }: {
             })}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Caminho até ao contrato */}
       <ol className="grid grid-cols-7 gap-1 text-center">
