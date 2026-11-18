@@ -2,8 +2,8 @@
 //
 // - Só o proprietário autenticado pode usar (verificado com o próprio JWT + RLS).
 // - Lê o sistema através de ferramentas (tabelas permitidas) e pode criar tarefas de IA.
-// - Se ANTHROPIC_API_KEY existir, usa a API da Anthropic (Claude Haiku 5.5; ANTHROPIC_MODEL opcional).
-//   Caso contrário, usa qualquer endpoint compatível com OpenAI (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL).
+// - Por omissão usa o endpoint compatível com OpenAI (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL), ex.: Groq.
+// - Só usa a API da Anthropic se AGENT_PROVIDER=anthropic (com ANTHROPIC_API_KEY e ANTHROPIC_MODEL opcional).
 // - propose_draft só cria textos na fila de aprovação; nada é enviado sem aprovação.
 //   Segredos definidos com: supabase secrets set LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...
 //
@@ -248,12 +248,14 @@ Deno.serve(async (req) => {
     const { data: owner } = await sb.from('administrators').select('id').eq('role', 'owner').limit(1)
     if (!owner || owner.length === 0) return json({ error: 'Acesso reservado ao proprietário.' }, 403)
 
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
+    const useAnthropic = Deno.env.get('AGENT_PROVIDER') === 'anthropic'
+    const anthropicKey = useAnthropic ? (Deno.env.get('ANTHROPIC_API_KEY') ?? '') : ''
     const anthropicModel = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-haiku-5-5'
     const llmBase = (Deno.env.get('LLM_BASE_URL') ?? '').replace(/\/+$/, '')
     const llmKey = Deno.env.get('LLM_API_KEY') ?? ''
     const llmModel = Deno.env.get('LLM_MODEL') ?? 'auto'
-    if (!anthropicKey && (!llmBase || !llmKey)) return json({ error: 'Defina ANTHROPIC_API_KEY (ou LLM_BASE_URL e LLM_API_KEY) nos segredos do Supabase.' }, 500)
+    if (useAnthropic && !anthropicKey) return json({ error: 'AGENT_PROVIDER=anthropic exige ANTHROPIC_API_KEY nos segredos do Supabase.' }, 500)
+    if (!useAnthropic && (!llmBase || !llmKey)) return json({ error: 'Defina LLM_BASE_URL e LLM_API_KEY nos segredos do Supabase.' }, 500)
 
     let body: { messages?: { role: 'user' | 'assistant'; content: string }[]; agent_code?: string }
     try { body = await req.json() } catch { return json({ error: 'Pedido inválido.' }, 400) }
