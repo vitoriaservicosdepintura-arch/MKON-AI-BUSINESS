@@ -464,6 +464,22 @@ const PT_CENTER: [number, number] = [39.6, -8.0]
 function MapSearch({ onDone }: { onDone: () => void }) {
     const toast = useToast()
     const navigate = useNavigate()
+
+    // Pesquisa feita pela Lucy: mostra os resultados e os passos da equipa, um a um.
+    useEffect(() => {
+        try {
+            const raw = sessionStorage.getItem('mkon.lucy.search')
+            if (!raw) return
+            sessionStorage.removeItem('mkon.lucy.search')
+            const d = JSON.parse(raw) as { query: string; messages: string[]; places: MapPlace[] }
+            setQuery(d.query)
+            setPlaces(d.places ?? [])
+            setSteps([])
+            setSummary('')
+            ;(d.messages ?? []).forEach((m, i) => setTimeout(() => setSteps(prev => [...prev, m]), 700 * (i + 1)))
+            setTimeout(() => setSummary('A Lucy concluiu a pesquisa. Nada foi enviado.'), 700 * ((d.messages?.length ?? 0) + 1))
+        } catch { /* ignore */ }
+    }, [])
     const [query, setQuery] = useState('')
     const [busy, setBusy] = useState(false)
     const [places, setPlaces] = useState<MapPlace[]>([])
@@ -636,7 +652,7 @@ function MapSearch({ onDone }: { onDone: () => void }) {
             )}
             {steps.length > 0 && (
                 <ol className="mt-2 space-y-1.5">
-                    {steps.map((m, i) => <li key={i} className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/75">{i + 1}. {m}</li>)}
+                    {steps.map((m, i) => <li key={i} className="animate-fade-up rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/75">{i + 1}. {m}</li>)}
                 </ol>
             )}
 

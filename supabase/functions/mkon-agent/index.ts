@@ -46,6 +46,8 @@ const APP_PAGES = [
     { path: '/admin', label: 'Administração' },
 ]
 
+let AUTH_HEADER = ''
+
 const TOOLS = [
     {
         type: 'function',
@@ -122,6 +124,22 @@ const TOOLS = [
     {
         type: 'function',
         function: {
+            name: 'search_map',
+            description: 'Pesquisa empresas no mapa (Google Maps) por tipo de negócio e localidade, usando a equipa de prospeção do sistema. Mostra o trabalho no ecrã de Prospeção. Não contacta ninguém.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Tipo de negócio, ex.: pintura, restaurante, canalizador' },
+                    place: { type: 'string', description: 'Cidade, distrito ou zona, ex.: Lisboa, Setúbal' },
+                },
+                required: ['query', 'place'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'create_ai_task',
             description: 'Cria uma tarefa para um agente de IA existente (fica pendente). Usar quando o proprietário pedir para criar/agendar trabalho.',
             parameters: {
@@ -142,6 +160,8 @@ const TOOLS = [
 const SYSTEM_PROMPT = `Você é a Lucy, assistente pessoal do proprietário do sistema privado MKON AI Business (agência de websites, NFC e serviços digitais em Portugal). Está ao estilo de um assistente tipo Jarvis: inteligente, atenta, proativa e comunicativa, com iniciativa e sentido de humor discreto.
 Responda sempre em Português de Portugal, de forma clara, calorosa e direta, tratando o utilizador por "senhor". As respostas são lidas em voz alta: use frases naturais e curtas, sem listas longas nem símbolos. Quando fizer sentido, termine com uma sugestão do próximo passo.
 Quando pedirem para abrir ou ir a um módulo, use open_page imediatamente e confirme em uma frase (ex.: "Com certeza, senhor. A abrir a prospeção.").
+Quando pedirem para pesquisar um tipo de negócio numa cidade ou distrito, use search_map. Depois, escolha as empresas mais fortes (avaliação alta, muitas avaliações e sem website são as melhores oportunidades), apresente as 3 a 5 melhores em poucas frases e pergunte o que deve fazer a seguir: preparar abordagem, follow-up ou nova pesquisa.
+Só prepare textos de abordagem ou follow-up com propose_draft depois de o senhor autorizar. Nunca contacte empresas: os envios são feitos pelo senhor a partir da fila de aprovação.
 Use as ferramentas para consultar dados reais antes de afirmar qualquer número ou estado. Nunca invente dados: se uma ferramenta não devolver nada, diga-o.
 Módulos: Dashboard, CRM (empresas, leads), Prospeção, Agentes IA, Mensagens, Websites, Propostas, NFC, Projetos, Financeiro, Relatórios, Administração.
 Ao analisar propostas, avalie valor, prazo, itens, estado e próximos passos. Ao criar tarefas, confirme o que foi criado.
@@ -213,6 +233,28 @@ async function runTool(name: string, args: Record<string, unknown>, sb: Supabase
         return { queued_for_approval: data }
     }
 
+    if (name === 'search_map') {
+        const url = Deno.env.get('SUPABASE_URL')!
+        const anon = Deno.env.get('SUPABASE_ANON_KEY')!
+        const q = [String(args.query ?? '').trim(), String(args.place ?? '').trim()].filter(Boolean).join(' ').slice(0, 200)
+        if (!q) return { error: 'Indique o tipo de negócio e a localidade.' }
+        const res = await fetch(`${url}/functions/v1/mkon-pipeline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: AUTH_HEADER, apikey: anon },
+            body: JSON.stringify({ query: q }),
+        })
+        const data = await res.json().catch(() => ({} as any))
+        if (!res.ok) return { error: data?.error ?? `Pesquisa falhou (${res.status}).` }
+        const locais = ((data.locais ?? []) as any[]).slice(0, 20)
+        const messages: string[] = Array.isArray(data.messages) ? data.messages.slice(0, 8) : []
+        actions.push({ type: 'show_search', query: q, messages, places: locais })
+        const strong = locais
+            .filter((p) => !p.website && Number(p.rating ?? 0) >= 4.3 && Number(p.reviews ?? 0) >= 20)
+            .slice(0, 5)
+            .map((p) => ({ name: p.name, rating: p.rating, reviews: p.reviews, phone: p.phone, city: p.address ?? null }))
+        return { query: q, encontradas: locais.length, sem_website: locais.filter((p) => !p.website).length, empresas_fortes: strong, status: data.status ?? null }
+    }
+
     if (name === 'create_ai_task') {
         const { data: agent, error: agentErr } = await sb.from('ai_agents').select('id,code').eq('code', String(args.agent_code ?? '')).maybeSingle()
         if (agentErr) return { error: agentErr.message }
@@ -239,6 +281,7 @@ Deno.serve(async (req) => {
 
     const authHeader = req.headers.get('Authorization') ?? ''
     if (!authHeader.startsWith('Bearer ')) return json({ error: 'Sessão em falta. Inicie sessão novamente.' }, 401)
+    AUTH_HEADER = authHeader
 
     const url = Deno.env.get('SUPABASE_URL')!
     const anon = Deno.env.get('SUPABASE_ANON_KEY')!
