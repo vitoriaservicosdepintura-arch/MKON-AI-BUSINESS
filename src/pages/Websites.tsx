@@ -6,6 +6,7 @@ import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, Skeleton } f
 import { useToast } from '@/components/ui/Toast'
 import { cn, relativeTime } from '@/lib/utils'
 import { isDemoActive } from '@/lib/demo'
+import { generateSite, STYLE_INFO, type SiteStyle } from '@/lib/siteGenerator'
 
 type Website = {
     id: string; title: string; status: string; slug?: string | null; preview_url: string | null; published_url: string | null
@@ -173,32 +174,51 @@ export default function Websites() {
 function CreateWebsiteModal({ open, templates, onClose, onCreated }: { open: boolean; templates: Template[]; onClose: () => void; onCreated: () => void }) {
     const toast = useToast()
     const demo = isDemoActive()
-    const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
-    const [f, setF] = useState({ company_id: '', template_id: '', title: '' })
+    const [companies, setCompanies] = useState<{ id: string; name: string; city: string | null; phone: string | null; email: string | null }[]>([])
+    const [f, setF] = useState<{ company_id: string; template_id: string; title: string; style: SiteStyle }>({ company_id: '', template_id: '', title: '', style: 'simple' })
     const [busy, setBusy] = useState(false)
 
     useEffect(() => {
         if (!open) return
-        supabase.from('companies').select('id, name').order('name').limit(100).then(({ data }) => setCompanies(data ?? []))
+        supabase.from('companies').select('id, name, city, phone, email').order('name').limit(100).then(({ data }) => setCompanies((data ?? []) as typeof companies))
     }, [open])
 
     const submit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (demo) { toast.push('warning', 'Modo demo.'); onClose(); return }
+        const company = companies.find(c => c.id === f.company_id)
+        const template = templates.find(t => t.id === f.template_id)
+        const gen = generateSite({ style: f.style, name: company?.name ?? f.title, city: company?.city, segment: template?.segment, phone: company?.phone, email: company?.email })
         setBusy(true)
-        const { error } = await supabase.from('websites').insert({ company_id: f.company_id, template_id: f.template_id || null, title: f.title.trim(), status: 'rascunho' })
+        const { error } = await supabase.from('websites').insert({
+            company_id: f.company_id, template_id: f.template_id || null, title: f.title.trim(), status: 'rascunho',
+            slug: gen.slug, content: gen.content, theme: gen.theme,
+        })
         setBusy(false)
         if (error) return toast.push('error', error.message)
-        toast.push('success', 'Website criado.')
-        setF({ company_id: '', template_id: '', title: '' }); onClose(); onCreated()
+        toast.push('success', 'Website criado com conteúdo completo. Pode editá-lo agora.')
+        setF({ company_id: '', template_id: '', title: '', style: 'simple' }); onClose(); onCreated()
     }
 
     return (
-        <Modal open={open} onClose={onClose} title="Novo website" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" form="new-website" loading={busy}>Criar</Button></>}>
-            <form id="new-website" onSubmit={submit} className="space-y-4">
-                <Field label="Empresa *"><select required className="input" value={f.company_id} onChange={e => setF(s => ({ ...s, company_id: e.target.value }))}><option value="">— Selecionar —</option>{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
-                <Field label="Template"><select className="input" value={f.template_id} onChange={e => setF(s => ({ ...s, template_id: e.target.value }))}><option value="">— Sem template —</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
+        <Modal open={open} onClose={onClose} title="Novo website" wide footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button type="submit" form="new-website" loading={busy}>Criar website</Button></>}>
+            <form id="new-website" onSubmit={submit} className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-2">
+                    {(Object.keys(STYLE_INFO) as SiteStyle[]).map(st => (
+                        <button type="button" key={st} onClick={() => setF(s => ({ ...s, style: st }))}
+                            className={cn('rounded-xl border p-4 text-left transition', f.style === st ? 'border-brand/60 bg-brand/10' : 'border-white/10 hover:bg-white/[0.04]')}>
+                            <div className="mb-2 flex h-20 overflow-hidden rounded-lg" style={{ background: st === 'pro' ? '#0A0A0A' : '#FFFFFF' }}>
+                                <div className="m-2 flex-1 rounded" style={{ background: st === 'pro' ? 'linear-gradient(120deg,#B8912F,#E6CD84)' : '#2563EB', opacity: 0.85 }} />
+                            </div>
+                            <p className="text-sm font-medium">{STYLE_INFO[st].label}</p>
+                            <p className="mt-1 text-[11px] text-white/45">{STYLE_INFO[st].description}</p>
+                        </button>
+                    ))}
+                </div>
+                <Field label="Empresa *"><select required className="input" value={f.company_id} onChange={e => setF(s => ({ ...s, company_id: e.target.value, title: s.title || `Website ${companies.find(c => c.id === e.target.value)?.name ?? ''}`.trim() }))}><option value="">— Selecionar —</option>{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+                <Field label="Template (segmento)"><select className="input" value={f.template_id} onChange={e => setF(s => ({ ...s, template_id: e.target.value }))}><option value="">— Sem template —</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
                 <Field label="Título do website *"><input required className="input" value={f.title} onChange={e => setF(s => ({ ...s, title: e.target.value }))} placeholder="Ex.: Website Pinturas Alves" /></Field>
+                <p className="text-[11px] text-white/35">O site é gerado com textos, serviços, processo, testemunhos e contactos do cliente. Depois pode editar tudo.</p>
             </form>
         </Modal>
     )
