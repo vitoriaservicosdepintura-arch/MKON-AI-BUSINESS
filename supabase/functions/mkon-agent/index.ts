@@ -2,7 +2,9 @@
 //
 // - Só o proprietário autenticado pode usar (verificado com o próprio JWT + RLS).
 // - Lê o sistema através de ferramentas (tabelas permitidas) e pode criar tarefas de IA.
-// - Usa qualquer endpoint compatível com OpenAI (FreeLLMAPI público, Groq, OpenAI…).
+// - Se ANTHROPIC_API_KEY existir, usa a API da Anthropic (Claude Haiku 5.5; ANTHROPIC_MODEL opcional).
+//   Caso contrário, usa qualquer endpoint compatível com OpenAI (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL).
+// - propose_draft só cria textos na fila de aprovação; nada é enviado sem aprovação.
 //   Segredos definidos com: supabase secrets set LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...
 //
 // Deploy: supabase functions deploy mkon-agent
@@ -102,6 +104,24 @@ const TOOLS = [
     {
         type: 'function',
         function: {
+            name: 'propose_draft',
+            description: 'Prepara um texto (mensagem, proposta, descrição) e coloca-o na fila de aprovação do proprietário. Nunca envia nada: só fica pendente até ser aprovado na página MKON AI.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    kind: { type: 'string', enum: ['mensagem', 'proposta', 'descricao', 'texto'] },
+                    title: { type: 'string', description: 'Título curto para identificar o texto' },
+                    body: { type: 'string', description: 'Texto completo proposto' },
+                    company_id: { type: 'string', description: 'UUID da empresa relacionada (opcional)' },
+                },
+                required: ['kind', 'title', 'body'],
+                additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'create_ai_task',
             description: 'Cria uma tarefa para um agente de IA existente (fica pendente). Usar quando o proprietário pedir para criar/agendar trabalho.',
             parameters: {
@@ -178,6 +198,20 @@ async function runTool(name: string, args: Record<string, unknown>, sb: Supabase
         return { rows: data, count: data?.length ?? 0 }
     }
 
+    if (name === 'propose_draft') {
+        const kind = ['mensagem', 'proposta', 'descricao', 'texto'].includes(String(args.kind)) ? String(args.kind) : 'texto'
+        const { data, error } = await sb.from('ai_drafts').insert({
+            kind,
+            title: String(args.title ?? '').slice(0, 200) || 'Sem título',
+            body: String(args.body ?? '').slice(0, 8000),
+            company_id: args.company_id ?? null,
+            status: 'pendente',
+        }).select('id,title,status').single()
+        if (error) return { error: error.message }
+        actions.push({ type: 'draft_created', id: data.id, title: data.title })
+        return { queued_for_approval: data }
+    }
+
     if (name === 'create_ai_task') {
         const { data: agent, error: agentErr } = await sb.from('ai_agents').select('id,code').eq('code', String(args.agent_code ?? '')).maybeSingle()
         if (agentErr) return { error: agentErr.message }
@@ -213,10 +247,12 @@ Deno.serve(async (req) => {
     const { data: owner } = await sb.from('administrators').select('id').eq('role', 'owner').limit(1)
     if (!owner || owner.length === 0) return json({ error: 'Acesso reservado ao proprietário.' }, 403)
 
+    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY') ?? ''
+    const anthropicModel = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-haiku-5-5'
     const llmBase = (Deno.env.get('LLM_BASE_URL') ?? '').replace(/\/+$/, '')
     const llmKey = Deno.env.get('LLM_API_KEY') ?? ''
     const llmModel = Deno.env.get('LLM_MODEL') ?? 'auto'
-    if (!llmBase || !llmKey) return json({ error: 'LLM_BASE_URL ou LLM_API_KEY não configurados nos segredos do Supabase.' }, 500)
+    if (!anthropicKey && (!llmBase || !llmKey)) return json({ error: 'Defina ANTHROPIC_API_KEY (ou LLM_BASE_URL e LLM_API_KEY) nos segredos do Supabase.' }, 500)
 
     let body: { messages?: { role: 'user' | 'assistant'; content: string }[]; agent_code?: string }
     try { body = await req.json() } catch { return json({ error: 'Pedido inválido.' }, 400) }
@@ -238,6 +274,10 @@ Deno.serve(async (req) => {
     const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
     const toolsUsed: string[] = []
     const actions: unknown[] = []
+
+    if (anthropicKey) {
+        return await runAnthropic(anthropicKey, anthropicModel, systemPrompt, history, sb, toolsUsed, actions)
+    }
 
     for (let step = 0; step < 6; step++) {
         let res: Response
@@ -277,6 +317,52 @@ Deno.serve(async (req) => {
 
     return json({ reply: 'Não consegui concluir o pedido dentro do limite de passos. Tente dividi-lo em partes mais pequenas.', tools_used: toolsUsed, actions })
 })
+
+/** Ciclo de agente com a API Anthropic (Claude Haiku 5.5), com as mesmas ferramentas. */
+async function runAnthropic(
+    key: string, model: string, system: string, history: { role: 'user' | 'assistant'; content: string }[],
+    sb: SupabaseClient, toolsUsed: string[], actions: unknown[],
+): Promise<Response> {
+    const tools = TOOLS.map((t) => ({ name: t.function.name, description: t.function.description, input_schema: t.function.parameters }))
+    const messages: any[] = history.map((m) => ({ role: m.role, content: m.content }))
+
+    for (let step = 0; step < 6; step++) {
+        let res: Response
+        try {
+            res = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+                body: JSON.stringify({ model, max_tokens: 2048, temperature: 0.3, system, tools, messages }),
+            })
+        } catch {
+            return json({ error: 'Não foi possível ligar à API da Anthropic a partir do servidor.' }, 502)
+        }
+        if (!res.ok) {
+            const detail = await res.text().catch(() => '')
+            return json({ error: `API da Anthropic devolveu erro ${res.status}.`, detail: detail.slice(0, 300) }, 502)
+        }
+
+        const data = await res.json()
+        const blocks: any[] = Array.isArray(data?.content) ? data.content : []
+        const uses = blocks.filter((b) => b.type === 'tool_use')
+
+        if (data?.stop_reason !== 'tool_use' || uses.length === 0) {
+            const reply = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim()
+            return json({ reply: reply || 'Sem resposta.', tools_used: toolsUsed, actions })
+        }
+
+        messages.push({ role: 'assistant', content: blocks })
+        const results: any[] = []
+        for (const use of uses) {
+            toolsUsed.push(use.name)
+            const result = await runTool(use.name, (use.input ?? {}) as Record<string, unknown>, sb, actions).catch((e) => ({ error: String(e) }))
+            results.push({ type: 'tool_result', tool_use_id: use.id, content: JSON.stringify(result) })
+        }
+        messages.push({ role: 'user', content: results })
+    }
+
+    return json({ reply: 'Não consegui concluir o pedido dentro do limite de passos. Tente dividi-lo em partes mais pequenas.', tools_used: toolsUsed, actions })
+}
 
 function json(payload: unknown, status = 200) {
     return new Response(JSON.stringify(payload), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
